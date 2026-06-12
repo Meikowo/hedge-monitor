@@ -1,0 +1,1262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>上市公司套保公告监控 MVP Demo</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: rgba(255,255,255,0.92);
+      --text: #152033;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --brand: #3657e3;
+      --brand2: #7c3aed;
+      --green: #0f9f6e;
+      --amber: #d97706;
+      --red: #dc2626;
+      --purple: #7c3aed;
+      --blue: #2563eb;
+      --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(54,87,227,0.12), transparent 32%),
+        radial-gradient(circle at 90% 8%, rgba(124,58,237,0.10), transparent 28%),
+        linear-gradient(180deg, #fbfcff 0%, var(--bg) 100%);
+    }
+
+    .app { max-width: 1440px; margin: 0 auto; padding: 24px; }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(226,232,240,0.9);
+      border-radius: 26px;
+      padding: 28px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(247,248,255,0.86));
+      box-shadow: var(--shadow);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 280px; height: 280px;
+      right: -90px; top: -110px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(54,87,227,0.24), rgba(124,58,237,0.12));
+      filter: blur(2px);
+    }
+    .hero-content { position: relative; z-index: 1; display: grid; grid-template-columns: 1.3fr 0.7fr; gap: 24px; align-items: end; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--brand); font-weight: 700; font-size: 13px; letter-spacing: .03em; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 6px rgba(15,159,110,0.12); }
+    h1 { margin: 12px 0 10px; font-size: clamp(28px, 4vw, 48px); line-height: 1.08; letter-spacing: -0.04em; }
+    .subtitle { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.75; max-width: 850px; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+
+    button, .file-label {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 15px;
+      font-weight: 700;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 10px 24px rgba(54,87,227,0.20);
+      transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+      white-space: nowrap;
+      font-size: 14px;
+    }
+    button:hover, .file-label:hover { transform: translateY(-1px); box-shadow: 0 14px 30px rgba(54,87,227,0.24); }
+    button.secondary, .file-label.secondary { background: #fff; color: var(--text); border: 1px solid var(--line); box-shadow: none; }
+    button.ghost { background: rgba(255,255,255,.72); color: var(--brand); border: 1px solid rgba(54,87,227,.18); box-shadow: none; }
+    button.danger { background: #fff; color: var(--red); border: 1px solid rgba(220,38,38,.22); box-shadow: none; }
+    input[type="file"] { display: none; }
+
+    .grid { display: grid; gap: 16px; }
+    .stats { grid-template-columns: repeat(6, 1fr); margin-top: 18px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid rgba(226,232,240,0.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .stat { padding: 18px; min-height: 104px; }
+    .stat .label { color: var(--muted); font-size: 13px; }
+    .stat .value { font-size: 30px; line-height: 1.2; font-weight: 850; letter-spacing: -0.04em; margin-top: 8px; }
+    .stat .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 14px;
+      align-items: center;
+      margin: 18px 0;
+      padding: 14px;
+    }
+    .filters { display: grid; grid-template-columns: 1.2fr repeat(4, minmax(120px, 1fr)); gap: 10px; }
+    .control {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 12px;
+      padding: 11px 12px;
+      color: var(--text);
+      outline: none;
+      font-size: 14px;
+    }
+    .control:focus { border-color: rgba(54,87,227,.6); box-shadow: 0 0 0 4px rgba(54,87,227,.08); }
+    textarea.control { min-height: 120px; resize: vertical; line-height: 1.65; }
+
+    .main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(360px, .85fr); gap: 18px; align-items: start; }
+    .panel-header { padding: 18px 18px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .panel-title { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
+    .panel-subtitle { color: var(--muted); font-size: 13px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 920px; }
+    th, td { padding: 13px 14px; text-align: left; border-top: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+    th { color: var(--muted); font-size: 12px; font-weight: 800; background: rgba(248,250,252,.8); }
+    tr.data-row { cursor: pointer; }
+    tr.data-row:hover { background: rgba(54,87,227,.035); }
+    tr.data-row.selected { background: rgba(54,87,227,.08); }
+    .company { font-weight: 800; }
+    .muted { color: var(--muted); }
+    .title-cell { max-width: 330px; line-height: 1.55; }
+    .amount { font-weight: 850; }
+
+    .tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 760;
+      background: #eef2ff;
+      color: #3730a3;
+      border: 1px solid rgba(99,102,241,.13);
+      white-space: nowrap;
+    }
+    .tag.info { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
+    .tag.notice { color: #a16207; background: #fffbeb; border-color: #fde68a; }
+    .tag.warning { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+    .tag.review { color: #6d28d9; background: #f5f3ff; border-color: #ddd6fe; }
+    .tag.good { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+    .tag.gray { color: #475569; background: #f8fafc; border-color: #e2e8f0; }
+
+    .detail { position: sticky; top: 18px; }
+    .detail-body { padding: 0 18px 18px; }
+    .detail-title { font-size: 20px; font-weight: 850; line-height: 1.35; margin: 8px 0; }
+    .section { margin-top: 16px; }
+    .section h3 { margin: 0 0 10px; font-size: 15px; }
+    .kv { display: grid; grid-template-columns: 120px 1fr; border-top: 1px solid var(--line); }
+    .kv div { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.55; }
+    .kv .k { color: var(--muted); font-weight: 760; }
+    .evidence {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 9px;
+      background: #fff;
+      line-height: 1.65;
+      font-size: 13px;
+    }
+    .evidence mark { background: #fef3c7; border-radius: 5px; padding: 1px 3px; }
+    .fake-pdf {
+      border-radius: 16px;
+      background: linear-gradient(180deg, #fff, #f8fafc);
+      border: 1px solid var(--line);
+      min-height: 190px;
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+    .fake-pdf::before {
+      content: "PDF 原文预览 / 证据定位示意";
+      color: var(--muted);
+      font-size: 12px;
+      position: absolute;
+      right: 14px;
+      top: 10px;
+    }
+    .pdf-page { font-size: 13px; line-height: 1.75; margin-top: 20px; white-space: pre-wrap; }
+    .highlight { background: #fef3c7; border-radius: 6px; padding: 1px 3px; }
+
+    .forms { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px; align-items: stretch; }
+    .form-body { padding: 18px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .full { grid-column: 1 / -1; }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px;
+      background: #fff;
+      min-height: 88px;
+    }
+    .step b { display: block; font-size: 13px; margin-bottom: 6px; }
+    .step span { color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      padding: 13px 16px;
+      border-radius: 14px;
+      background: #0f172a;
+      color: white;
+      box-shadow: var(--shadow);
+      transform: translateY(120%);
+      transition: transform .22s ease;
+      z-index: 99;
+      max-width: 360px;
+      font-size: 14px;
+    }
+    .toast.show { transform: translateY(0); }
+
+    .empty { padding: 36px 18px; color: var(--muted); text-align: center; }
+    .small { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+    @media (max-width: 1120px) {
+      .stats { grid-template-columns: repeat(3, 1fr); }
+      .main { grid-template-columns: 1fr; }
+      .detail { position: static; }
+      .pipeline { grid-template-columns: repeat(3, 1fr); }
+      .hero-content { grid-template-columns: 1fr; }
+      .hero-actions { justify-content: flex-start; }
+      .forms { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .app { padding: 14px; }
+      .hero { padding: 20px; border-radius: 20px; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .stat { min-height: 90px; padding: 14px; }
+      .stat .value { font-size: 24px; }
+      .toolbar { grid-template-columns: 1fr; }
+      .filters { grid-template-columns: 1fr; }
+      .pipeline { grid-template-columns: 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+      .kv { grid-template-columns: 1fr; }
+      .kv div { padding: 7px 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="hero">
+      <div class="hero-content">
+        <div>
+          <div class="eyebrow"><span class="dot"></span>内部版 MVP · 单文件可运行原型</div>
+          <h1>上市公司套保公告与年报披露监控</h1>
+          <p class="subtitle">
+            这个 HTML 不连接真实后端，使用内置样例和浏览器本地存储，模拟“公告导入 → 关键词召回 → 结构化抽取 → 证据链 → 提示标签 → 前端展示”的最小闭环。后续真实项目可把这里的页面逻辑迁移到 React + FastAPI。
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="runPipelineBtn">运行识别闭环</button>
+          <button class="secondary" id="exportJsonBtn">导出 JSON</button>
+          <button class="secondary" id="exportCsvBtn">导出 CSV</button>
+          <label class="file-label secondary" for="importJson">导入 JSON</label>
+          <input id="importJson" type="file" accept="application/json" />
+          <button class="danger" id="resetBtn">恢复样例</button>
+        </div>
+      </div>
+      <div class="pipeline" aria-label="pipeline">
+        <div class="step"><b>1. 公告导入</b><span>内置样例 / 手动新增 / JSON 导入</span></div>
+        <div class="step"><b>2. 关键词召回</b><span>标题 + 正文命中套保、衍生品、远期结售汇等词</span></div>
+        <div class="step"><b>3. 字段抽取</b><span>用正则和规则模拟 LLM 抽取核心字段</span></div>
+        <div class="step"><b>4. 模型校验</b><span>金额、币种、审批层级、证据句校验</span></div>
+        <div class="step"><b>5. 证据链</b><span>字段值关联原文句子和模拟页码</span></div>
+        <div class="step"><b>6. 页面提示</b><span>大额、股东会、亏损、低置信度等提示</span></div>
+      </div>
+    </section>
+
+    <section class="grid stats" id="stats"></section>
+
+    <section class="card toolbar">
+      <div class="filters">
+        <input class="control" id="searchInput" placeholder="搜索公司、代码、标题、品种、证据句……" />
+        <select class="control" id="typeFilter">
+          <option value="">全部类型</option>
+          <option value="外汇套保">外汇套保</option>
+          <option value="商品套保">商品套保</option>
+          <option value="利率套保">利率套保</option>
+          <option value="综合衍生品">综合衍生品</option>
+          <option value="年报披露">年报披露</option>
+          <option value="非候选">非候选</option>
+        </select>
+        <select class="control" id="tipFilter">
+          <option value="">全部提示</option>
+          <option value="info">普通提示</option>
+          <option value="notice">值得关注</option>
+          <option value="warning">风险提示</option>
+          <option value="review">需要确认</option>
+        </select>
+        <select class="control" id="reviewFilter">
+          <option value="">全部置信度</option>
+          <option value="review">只看需确认</option>
+          <option value="ok">只看较高置信度</option>
+        </select>
+        <select class="control" id="sortSelect">
+          <option value="date_desc">日期倒序</option>
+          <option value="score_desc">候选分数倒序</option>
+          <option value="amount_desc">金额倒序</option>
+          <option value="confidence_asc">置信度升序</option>
+        </select>
+      </div>
+      <div class="small" id="clock"></div>
+    </section>
+
+    <main class="main">
+      <section class="card">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">公告监控列表</h2>
+            <div class="panel-subtitle" id="listSubtitle">—</div>
+          </div>
+          <button class="ghost" id="clearFiltersBtn">清空筛选</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>公司</th>
+                <th>标题</th>
+                <th>类型 / 工具</th>
+                <th>金额</th>
+                <th>提示</th>
+                <th>置信度</th>
+              </tr>
+            </thead>
+            <tbody id="announcementRows"></tbody>
+          </table>
+        </div>
+        <div id="emptyList" class="empty" style="display:none;">没有符合筛选条件的公告。</div>
+      </section>
+
+      <aside class="card detail" id="detailPanel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">公告详情</h2>
+            <div class="panel-subtitle">点击左侧公告查看抽取字段、提示和证据链</div>
+          </div>
+        </div>
+        <div class="detail-body" id="detailBody">
+          <div class="empty">请选择一条公告。</div>
+        </div>
+      </aside>
+    </main>
+
+    <section class="forms">
+      <section class="card">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">手动新增公告 / 年报文本</h2>
+            <div class="panel-subtitle">适合把一段公告内容粘贴进来测试规则识别和字段抽取。</div>
+          </div>
+        </div>
+        <div class="form-body">
+          <div class="form-grid">
+            <input class="control" id="newCode" placeholder="证券代码，例如 600000" />
+            <input class="control" id="newCompany" placeholder="公司简称，例如 样例股份" />
+            <input class="control full" id="newTitle" placeholder="公告标题，例如 关于开展外汇套期保值业务的公告" />
+            <input class="control" id="newDate" type="date" />
+            <select class="control" id="newSource">
+              <option value="manual">手动录入</option>
+              <option value="cninfo">巨潮样例</option>
+              <option value="sse">上交所样例</option>
+              <option value="szse">深交所样例</option>
+            </select>
+            <textarea class="control full" id="newText" placeholder="粘贴公告正文。建议包含：交易目的、工具、最高合约价值、保证金/权利金、授权期限、审批层级、风险提示等。"></textarea>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+            <button id="addAnnouncementBtn">保存并抽取</button>
+            <button class="secondary" id="fillSampleTextBtn">填入测试文本</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">年报披露摘要</h2>
+            <div class="panel-subtitle">从“年度报告”样例中扫描套保、衍生金融资产/负债和损益相关内容。</div>
+          </div>
+        </div>
+        <div class="form-body" id="annualSummary"></div>
+      </section>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const STORAGE_KEY = 'hedge_monitor_mvp_demo_v1';
+
+    const sampleAnnouncements = [
+      {
+        id: 'demo-001', date: '2026-06-11', code: '600111', company: '华东出口', exchange: 'SSE', source: 'cninfo',
+        title: '华东出口股份有限公司关于开展外汇套期保值业务的公告',
+        text: '第一页：为有效规避和防范汇率波动风险，公司及子公司拟开展外汇套期保值业务。交易品种包括远期结售汇、外汇远期、外汇期权等。第二页：公司开展外汇套期保值业务以正常生产经营为基础，不进行以投机为目的的衍生品交易。第三页：公司任一交易日持有的最高合约价值不超过人民币10亿元，授权期限为董事会审议通过之日起12个月。本事项已经公司董事会审议通过，无需提交股东大会审议。第四页：公司将建立严格的授权审批制度和风险控制措施。',
+        pages: [
+          '为有效规避和防范汇率波动风险，公司及子公司拟开展外汇套期保值业务。交易品种包括远期结售汇、外汇远期、外汇期权等。',
+          '公司开展外汇套期保值业务以正常生产经营为基础，不进行以投机为目的的衍生品交易。',
+          '公司任一交易日持有的最高合约价值不超过人民币10亿元，授权期限为董事会审议通过之日起12个月。本事项已经公司董事会审议通过，无需提交股东大会审议。',
+          '公司将建立严格的授权审批制度和风险控制措施。'
+        ]
+      },
+      {
+        id: 'demo-002', date: '2026-06-10', code: '000222', company: '南方铜业', exchange: 'SZSE', source: 'cninfo',
+        title: '南方铜业股份有限公司关于开展商品期货套期保值业务的公告',
+        text: '第一页：公司主要原材料包括铜、铝、锌等，为降低原材料价格波动风险，公司拟使用期货、期权等工具开展商品期货套期保值业务。第二页：预计任一交易日持有的最高合约价值不超过人民币18亿元，预计动用保证金和权利金上限不超过人民币2亿元。第三页：本事项尚需提交股东大会审议。第四页：公司套期保值业务坚持风险中性原则，不以投机为目的。',
+        pages: [
+          '公司主要原材料包括铜、铝、锌等，为降低原材料价格波动风险，公司拟使用期货、期权等工具开展商品期货套期保值业务。',
+          '预计任一交易日持有的最高合约价值不超过人民币18亿元，预计动用保证金和权利金上限不超过人民币2亿元。',
+          '本事项尚需提交股东大会审议。',
+          '公司套期保值业务坚持风险中性原则，不以投机为目的。'
+        ]
+      },
+      {
+        id: 'demo-003', date: '2026-06-09', code: '300333', company: '星海科技', exchange: 'SZSE', source: 'cninfo',
+        title: '星海科技集团股份有限公司关于开展金融衍生品交易业务的可行性分析报告',
+        text: '第一页：为管理外汇风险和利率风险，公司拟开展金融衍生品交易业务，工具包括远期结售汇、利率掉期等。第二页：预计任一交易日持有的最高合约价值不超过等值人民币5亿元。第三页：相关交易以套期保值为目的，与公司实际经营中的外币资产负债和浮动利率贷款相匹配。',
+        pages: [
+          '为管理外汇风险和利率风险，公司拟开展金融衍生品交易业务，工具包括远期结售汇、利率掉期等。',
+          '预计任一交易日持有的最高合约价值不超过等值人民币5亿元。',
+          '相关交易以套期保值为目的，与公司实际经营中的外币资产负债和浮动利率贷款相匹配。'
+        ]
+      },
+      {
+        id: 'demo-004', date: '2026-06-08', code: '688888', company: '北辰新材', exchange: 'SSE', source: 'sse',
+        title: '北辰新材2025年年度报告',
+        text: '金融工具风险管理：公司面临外汇风险和商品价格风险。报告期内，公司开展远期结售汇和铜期货套期保值业务。财务报表附注显示，期末衍生金融资产为3,200万元，衍生金融负债为8,500万元，公允价值变动损失为1,100万元。公司认为相关套期工具与被套期项目存在经济关系，但部分期间未完全实现预期抵销效果。',
+        pages: [
+          '金融工具风险管理：公司面临外汇风险和商品价格风险。报告期内，公司开展远期结售汇和铜期货套期保值业务。',
+          '财务报表附注显示，期末衍生金融资产为3,200万元，衍生金融负债为8,500万元，公允价值变动损失为1,100万元。',
+          '公司认为相关套期工具与被套期项目存在经济关系，但部分期间未完全实现预期抵销效果。'
+        ]
+      },
+      {
+        id: 'demo-005', date: '2026-06-07', code: '002555', company: '中原食品', exchange: 'SZSE', source: 'cninfo',
+        title: '中原食品股份有限公司关于修订公司章程的公告',
+        text: '公司本次修订章程主要涉及董事会人数、经营范围表述、投资者关系管理等内容，不涉及套期保值、期货或衍生品交易。',
+        pages: ['公司本次修订章程主要涉及董事会人数、经营范围表述、投资者关系管理等内容，不涉及套期保值、期货或衍生品交易。']
+      },
+      {
+        id: 'demo-006', date: '2026-06-07', code: '603666', company: '远洋制造', exchange: 'SSE', source: 'cninfo',
+        title: '远洋制造股份有限公司关于开展外汇衍生品交易业务的公告',
+        text: '为防范汇率波动风险，公司拟开展外汇衍生品交易，包括远期结售汇和外汇期权。预计任一交易日持有的最高合约价值不超过3亿美元。授权期限为自董事会审议通过之日起12个月。公司报告期曾出现外汇衍生品浮亏，后续将强化风险控制。',
+        pages: [
+          '为防范汇率波动风险，公司拟开展外汇衍生品交易，包括远期结售汇和外汇期权。',
+          '预计任一交易日持有的最高合约价值不超过3亿美元。授权期限为自董事会审议通过之日起12个月。',
+          '公司报告期曾出现外汇衍生品浮亏，后续将强化风险控制。'
+        ]
+      },
+      {
+        id: 'demo-007', date: '2026-06-06', code: '301777', company: '长河能源', exchange: 'SZSE', source: 'cninfo',
+        title: '长河能源关于开展期货和衍生品交易业务的公告',
+        text: '公司拟开展原油、天然气相关期货和期权交易，用于管理能源采购价格风险。预计任一交易日持有的最高合约价值不超过人民币25亿元，保证金和权利金上限不超过人民币3亿元。本事项需提交股东大会审议。交易目的为套期保值，不进行单纯以盈利为目的的投机交易。',
+        pages: [
+          '公司拟开展原油、天然气相关期货和期权交易，用于管理能源采购价格风险。',
+          '预计任一交易日持有的最高合约价值不超过人民币25亿元，保证金和权利金上限不超过人民币3亿元。',
+          '本事项需提交股东大会审议。交易目的为套期保值，不进行单纯以盈利为目的的投机交易。'
+        ]
+      },
+      {
+        id: 'demo-008', date: '2026-06-05', code: '600999', company: '西部金属', exchange: 'SSE', source: 'cninfo',
+        title: '西部金属股份有限公司关于证券投资与衍生品交易额度的公告',
+        text: '公司拟使用自有资金开展证券投资及部分衍生品交易。相关交易不以套期保值为目的，预计任一时点投资余额不超过人民币6亿元。本事项已经董事会审议通过。',
+        pages: [
+          '公司拟使用自有资金开展证券投资及部分衍生品交易。相关交易不以套期保值为目的，预计任一时点投资余额不超过人民币6亿元。',
+          '本事项已经董事会审议通过。'
+        ]
+      }
+    ];
+
+    let state = loadState();
+    let selectedId = state.records[0]?.id || null;
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return { records: sampleAnnouncements.map(x => ({...x})) };
+    }
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 2400);
+    }
+
+    function today() {
+      const d = new Date();
+      return d.toISOString().slice(0,10);
+    }
+
+    function splitSentences(text) {
+      return String(text || '')
+        .replace(/\s+/g, ' ')
+        .split(/(?<=[。！？；;])/)
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+
+    function normalizeText(record) {
+      return [record.title, record.text, ...(record.pages || [])].join('。');
+    }
+
+    function includesAny(text, words) {
+      return words.some(w => text.includes(w));
+    }
+
+    const keywordGroups = {
+      core: ['套期保值', '套保', '套期工具', '被套期项目', '套期会计'],
+      derivatives: ['期货', '期权', '远期', '掉期', '互换', '远期结售汇', '外汇远期', '外汇期权', '金融衍生品', '衍生品交易', '衍生金融资产', '衍生金融负债'],
+      risk: ['外汇风险', '汇率风险', '商品价格风险', '原材料价格波动', '利率风险', '能源采购价格风险'],
+      docs: ['可行性分析报告', '管理制度', '年度报告'],
+      loss: ['亏损', '浮亏', '损失', '公允价值变动损失', '未按预期抵销', '未完全实现预期抵销'],
+      assets: ['美元', '欧元', '日元', '港币', '铜', '铝', '锌', '镍', '黄金', '白银', '原油', '天然气', '煤炭', '焦煤', '焦炭', '铁矿石', '螺纹钢', '热卷', 'PTA', '甲醇', '纯碱', '玻璃', '棉花', '豆粕', '豆油', '玉米']
+    };
+
+    function scoreCandidate(record) {
+      const title = record.title || '';
+      const text = normalizeText(record);
+      let titleScore = 0, bodyScore = 0, lossScore = 0;
+      const hits = [];
+
+      const highTitle = ['套期保值', '套保', '期货和衍生品交易', '金融衍生品交易', '外汇衍生品', '远期结售汇'];
+      highTitle.forEach(w => { if (title.includes(w)) { titleScore += 40; hits.push(w); } });
+      if (title.includes('可行性分析报告')) { titleScore += 25; hits.push('可行性分析报告'); }
+      if (title.includes('年度报告')) { titleScore += 18; hits.push('年度报告'); }
+
+      [...keywordGroups.core, ...keywordGroups.derivatives, ...keywordGroups.risk].forEach(w => {
+        const count = (text.match(new RegExp(escapeRegExp(w), 'g')) || []).length;
+        if (count > 0) {
+          bodyScore += Math.min(count * 6, 18);
+          hits.push(w);
+        }
+      });
+      keywordGroups.loss.forEach(w => {
+        if (text.includes(w)) { lossScore += 15; hits.push(w); }
+      });
+
+      const finalScore = Math.min(100, titleScore + Math.min(60, bodyScore) + Math.min(25, lossScore));
+      const annual = title.includes('年度报告');
+      const candidate = finalScore >= 40 || annual;
+      return { finalScore, titleScore, bodyScore, lossScore, hits: [...new Set(hits)], candidate, annual };
+    }
+
+    function escapeRegExp(s) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function detectHedgeType(record) {
+      const text = normalizeText(record);
+      const title = record.title || '';
+      if (title.includes('年度报告')) return '年报披露';
+      if (includesAny(text, ['铜', '铝', '锌', '原油', '天然气', '铁矿石', '纯碱', '商品期货', '原材料价格波动', '能源采购价格风险'])) return '商品套保';
+      if (includesAny(text, ['利率风险', '利率掉期', '利率互换'])) return '利率套保';
+      if (includesAny(text, ['外汇', '汇率', '远期结售汇', '美元', '欧元', '外汇期权'])) return '外汇套保';
+      if (includesAny(text, ['衍生品', '期货', '期权'])) return '综合衍生品';
+      return '非候选';
+    }
+
+    function extractList(text, words) {
+      return words.filter(w => text.includes(w));
+    }
+
+    function chineseAmountToNumber(num, unit) {
+      const n = parseFloat(String(num).replace(/,/g, ''));
+      if (!Number.isFinite(n)) return null;
+      if (unit.includes('亿')) return n * 100000000;
+      if (unit.includes('万')) return n * 10000;
+      return n;
+    }
+
+    function extractAmountByContext(text, contexts) {
+      const sentences = splitSentences(text);
+      const patterns = [
+        /((?:人民币|等值人民币|美元|欧元|港币)?\s*[0-9,]+(?:\.[0-9]+)?\s*(?:亿元|亿|万元|万|元|亿美元|万美元|欧元|美元))/g,
+        /([0-9,]+(?:\.[0-9]+)?\s*(?:亿元|亿|万元|万|元|亿美元|万美元|欧元|美元))/g
+      ];
+      for (const s of sentences) {
+        if (!contexts.some(c => s.includes(c))) continue;
+        for (const p of patterns) {
+          const matches = [...s.matchAll(p)];
+          if (matches.length) {
+            const raw = matches[0][1].replace(/\s+/g, '');
+            const currency = raw.includes('美元') ? 'USD' : raw.includes('欧元') ? 'EUR' : raw.includes('港币') ? 'HKD' : 'CNY';
+            const amountMatch = raw.match(/([0-9,]+(?:\.[0-9]+)?)(亿元|亿|万元|万|元|亿美元|万美元|美元|欧元)/);
+            let amount = null;
+            if (amountMatch) {
+              const num = amountMatch[1];
+              const unit = amountMatch[2];
+              if (unit === '亿美元') amount = parseFloat(num.replace(/,/g,'')) * 100000000;
+              else if (unit === '万美元') amount = parseFloat(num.replace(/,/g,'')) * 10000;
+              else if (unit === '美元' || unit === '欧元') amount = parseFloat(num.replace(/,/g,''));
+              else amount = chineseAmountToNumber(num, unit);
+            }
+            return { amount, currency, raw, sentence: s };
+          }
+        }
+      }
+      return { amount: null, currency: null, raw: null, sentence: null };
+    }
+
+    function extractApproval(text) {
+      if (text.includes('提交股东大会') || text.includes('提交股东会')) return '股东会';
+      if (text.includes('董事会审议') || text.includes('董事会审议通过')) return '董事会';
+      return '不确定';
+    }
+
+    function extractPeriod(text) {
+      const sentences = splitSentences(text);
+      for (const s of sentences) {
+        if (s.includes('授权期限') || s.includes('有效期') || s.includes('期限')) {
+          const m = s.match(/(?:授权期限|有效期|期限).*?(\d+\s*个月|\d+\s*年)/);
+          if (m) return { value: m[1].replace(/\s+/g,''), sentence: s };
+          return { value: s.slice(0, 80), sentence: s };
+        }
+      }
+      return { value: null, sentence: null };
+    }
+
+    function findEvidence(record, field, value, extraWords = []) {
+      const pages = record.pages && record.pages.length ? record.pages : [record.text || ''];
+      const candidates = [];
+      pages.forEach((pageText, idx) => {
+        splitSentences(pageText).forEach(sentence => {
+          const hitValue = value && String(value).length > 1 && sentence.includes(String(value));
+          const hitWords = extraWords.some(w => sentence.includes(w));
+          if (hitValue || hitWords) candidates.push({ field, page_no: idx + 1, quote: sentence });
+        });
+      });
+      return candidates[0] || null;
+    }
+
+    function analyzeRecord(record) {
+      const text = normalizeText(record);
+      const scored = scoreCandidate(record);
+      const hedgeType = scored.candidate ? detectHedgeType(record) : '非候选';
+      const instruments = extractList(text, ['远期结售汇', '外汇远期', '外汇期权', '期货', '期权', '利率掉期', '利率互换', '掉期', '互换']);
+      const assets = extractList(text, keywordGroups.assets);
+      const risks = extractList(text, ['汇率风险', '外汇风险', '商品价格风险', '原材料价格波动', '利率风险', '能源采购价格风险']);
+
+      const contract = extractAmountByContext(text, ['最高合约价值', '交易额度', '合约价值', '投资余额']);
+      const margin = extractAmountByContext(text, ['保证金', '权利金']);
+      const approval = extractApproval(text);
+      const period = extractPeriod(text);
+      const hasLoss = includesAny(text, keywordGroups.loss);
+      const nonHedge = text.includes('不以套期保值为目的') || text.includes('不进行套期保值') || text.includes('不以套保为目的');
+
+      let confidence = scored.candidate ? 0.58 + scored.finalScore / 250 : 0.25;
+      if (contract.amount) confidence += 0.08;
+      if (instruments.length) confidence += 0.05;
+      if (assets.length) confidence += 0.03;
+      if (approval !== '不确定') confidence += 0.03;
+      if (hedgeType === '年报披露') confidence -= 0.04;
+      if (nonHedge) confidence -= 0.10;
+      confidence = Math.max(0.05, Math.min(0.96, confidence));
+
+      const evidences = [];
+      const addEv = (ev) => { if (ev && !evidences.some(x => x.field === ev.field && x.quote === ev.quote)) evidences.push(ev); };
+      addEv(findEvidence(record, 'hedge_type', hedgeType, ['套期保值', '套保', '衍生品', '远期结售汇', '期货']));
+      addEv(contract.sentence ? {field: 'contract_value_limit', page_no: pageOfSentence(record, contract.sentence), quote: contract.sentence} : null);
+      addEv(margin.sentence ? {field: 'margin_or_premium_limit', page_no: pageOfSentence(record, margin.sentence), quote: margin.sentence} : null);
+      addEv(period.sentence ? {field: 'authorization_period', page_no: pageOfSentence(record, period.sentence), quote: period.sentence} : null);
+      addEv(findEvidence(record, 'approval_level', approval, ['股东大会', '股东会', '董事会审议']));
+      if (hasLoss) addEv(findEvidence(record, 'loss_disclosure', '亏损', keywordGroups.loss));
+      if (nonHedge) addEv(findEvidence(record, 'non_hedging', '不以套期保值为目的', ['不以套期保值为目的']));
+
+      let annual = null;
+      if (record.title.includes('年度报告') || hedgeType === '年报披露') {
+        annual = extractAnnualDisclosure(record);
+      }
+
+      const event = {
+        is_candidate: scored.candidate,
+        candidate_score: scored.finalScore,
+        title_score: scored.titleScore,
+        body_score: scored.bodyScore,
+        loss_score: scored.lossScore,
+        keyword_hits: scored.hits,
+        is_hedging_related: scored.candidate && !nonHedge,
+        hedge_type: hedgeType,
+        instrument_type: instruments,
+        underlying_asset: assets,
+        risk_type: risks,
+        contract_value_limit: contract.amount,
+        contract_value_currency: contract.currency,
+        contract_value_raw_text: contract.raw,
+        margin_limit: margin.amount,
+        margin_currency: margin.currency,
+        margin_raw_text: margin.raw,
+        authorization_period: period.value,
+        approval_level: approval,
+        uses_raised_funds: text.includes('募集资金'),
+        has_loss_disclosure: hasLoss,
+        is_non_hedging_speculation: nonHedge,
+        confidence,
+        need_review: confidence < 0.75 || (scored.candidate && evidences.length === 0) || nonHedge,
+        evidence: evidences,
+        annual
+      };
+
+      event.tips = generateTips(record, event);
+      return {...record, event};
+    }
+
+    function pageOfSentence(record, sentence) {
+      const pages = record.pages && record.pages.length ? record.pages : [record.text || ''];
+      const idx = pages.findIndex(p => p.includes(sentence));
+      return idx >= 0 ? idx + 1 : 1;
+    }
+
+    function extractAnnualDisclosure(record) {
+      const text = normalizeText(record);
+      const assets = extractAmountByContext(text, ['衍生金融资产']);
+      const liabilities = extractAmountByContext(text, ['衍生金融负债']);
+      const fairValue = extractAmountByContext(text, ['公允价值变动损失', '公允价值变动收益', '公允价值变动']);
+      return {
+        report_year: (record.title.match(/(20\d{2})年年度报告/) || [null, null])[1],
+        has_hedging: includesAny(text, ['套期保值', '远期结售汇', '衍生金融资产', '衍生金融负债', '套期工具']),
+        derivative_assets: assets.amount,
+        derivative_assets_raw: assets.raw,
+        derivative_liabilities: liabilities.amount,
+        derivative_liabilities_raw: liabilities.raw,
+        fair_value_change_gain_loss: fairValue.amount,
+        fair_value_raw: fairValue.raw,
+        description: splitSentences(text).filter(s => includesAny(s, ['套期保值', '衍生金融资产', '衍生金融负债', '公允价值变动', '金融工具风险管理'])).slice(0, 4)
+      };
+    }
+
+    function generateTips(record, event) {
+      const tips = [];
+      const push = (level, type, title, message, field, value) => tips.push({level, type, title, message, field, value});
+      if (event.is_candidate) push('info', 'new_candidate', '新增候选公告', '该公告命中套保/衍生品相关关键词，已进入结构化识别。', 'candidate_score', String(event.candidate_score));
+      if (event.hedge_type === '年报披露') push('info', 'annual_report', '年报披露', '该文件为年度报告样例，系统已扫描套保及衍生金融资产/负债相关内容。', 'document_type', 'annual_report');
+      if (event.contract_value_limit && event.contract_value_currency === 'CNY' && event.contract_value_limit >= 1000000000) push('notice', 'large_amount', '大额额度', `最高合约价值约 ${formatAmount(event.contract_value_limit, event.contract_value_currency)}，建议结合营收、净资产和风险敞口进一步判断。`, 'contract_value_limit', String(event.contract_value_limit));
+      if (event.contract_value_limit && event.contract_value_currency && event.contract_value_currency !== 'CNY') push('notice', 'foreign_currency_amount', '外币额度', `最高合约价值为 ${formatAmount(event.contract_value_limit, event.contract_value_currency)}，需要后续按汇率折算比较。`, 'contract_value_limit', String(event.contract_value_limit));
+      if (event.approval_level === '股东会') push('notice', 'shareholder_approval', '股东会审议', '该事项需要提交股东会/股东大会审议，通常代表规模或重要性较高。', 'approval_level', '股东会');
+      if (event.has_loss_disclosure) push('warning', 'loss_expression', '出现亏损表述', '文本中出现亏损、浮亏、公允价值变动损失或未按预期抵销等表述。', 'has_loss_disclosure', 'true');
+      if (event.is_non_hedging_speculation) push('warning', 'non_hedging', '疑似非套保交易', '文本明确出现“不以套期保值为目的”等表述，应与真正套保业务区分。', 'is_non_hedging_speculation', 'true');
+      if (event.confidence < 0.75) push('review', 'low_confidence', '低置信度需确认', '该条抽取结果置信度偏低，建议人工核对标题、金额和证据句。', 'confidence', event.confidence.toFixed(2));
+      if (!event.evidence || event.evidence.length === 0) push('review', 'missing_evidence', '缺少证据句', '结构化字段未找到足够原文证据，建议人工确认。', 'evidence', 'missing');
+      return tips;
+    }
+
+    function analyzeAll() {
+      state.records = state.records.map(r => analyzeRecord(r));
+      saveState();
+      selectedId = state.records.find(r => r.id === selectedId)?.id || state.records[0]?.id || null;
+      render();
+      toast('已完成：关键词召回、字段抽取、证据链和提示生成。');
+    }
+
+    function getAnalyzedRecords() {
+      if (!state.records.every(r => r.event)) analyzeAll();
+      return state.records;
+    }
+
+    function formatAmount(amount, currency) {
+      if (amount == null || !Number.isFinite(amount)) return '—';
+      const unit = currency || 'CNY';
+      if (Math.abs(amount) >= 100000000) return `${(amount / 100000000).toFixed(2).replace(/\.00$/, '')}亿 ${unit}`;
+      if (Math.abs(amount) >= 10000) return `${(amount / 10000).toFixed(2).replace(/\.00$/, '')}万 ${unit}`;
+      return `${amount.toLocaleString()} ${unit}`;
+    }
+
+    function pct(x) {
+      if (x == null) return '—';
+      return `${Math.round(x * 100)}%`;
+    }
+
+    function filteredRecords() {
+      const records = getAnalyzedRecords();
+      const q = document.getElementById('searchInput').value.trim().toLowerCase();
+      const type = document.getElementById('typeFilter').value;
+      const tip = document.getElementById('tipFilter').value;
+      const review = document.getElementById('reviewFilter').value;
+      const sort = document.getElementById('sortSelect').value;
+
+      let arr = records.filter(r => {
+        const e = r.event || {};
+        const hay = [r.code, r.company, r.title, r.text, e.hedge_type, ...(e.instrument_type || []), ...(e.underlying_asset || []), ...((e.evidence || []).map(x => x.quote))].join(' ').toLowerCase();
+        if (q && !hay.includes(q)) return false;
+        if (type && e.hedge_type !== type) return false;
+        if (tip && !(e.tips || []).some(t => t.level === tip)) return false;
+        if (review === 'review' && !e.need_review) return false;
+        if (review === 'ok' && e.need_review) return false;
+        return true;
+      });
+
+      arr.sort((a,b) => {
+        const ea = a.event || {}, eb = b.event || {};
+        if (sort === 'score_desc') return (eb.candidate_score || 0) - (ea.candidate_score || 0);
+        if (sort === 'amount_desc') return (eb.contract_value_limit || 0) - (ea.contract_value_limit || 0);
+        if (sort === 'confidence_asc') return (ea.confidence || 0) - (eb.confidence || 0);
+        return String(b.date).localeCompare(String(a.date));
+      });
+      return arr;
+    }
+
+    function renderStats() {
+      const records = getAnalyzedRecords();
+      const candidates = records.filter(r => r.event?.is_candidate).length;
+      const hedgeRelated = records.filter(r => r.event?.is_hedging_related).length;
+      const annual = records.filter(r => r.event?.annual?.has_hedging).length;
+      const review = records.filter(r => r.event?.need_review).length;
+      const tips = records.reduce((n, r) => n + (r.event?.tips?.length || 0), 0);
+      const large = records.filter(r => r.event?.tips?.some(t => t.type === 'large_amount')).length;
+      const data = [
+        ['公告总数', records.length, '内置样例 + 本地新增'],
+        ['候选公告', candidates, '命中套保/衍生品规则'],
+        ['套保相关', hedgeRelated, '排除明确非套保'],
+        ['年报披露', annual, '年度报告专项扫描'],
+        ['需确认', review, '低置信度或非套保'],
+        ['提示数量', tips, `其中大额 ${large} 条`]
+      ];
+      document.getElementById('stats').innerHTML = data.map(([label,value,hint]) => `
+        <div class="card stat">
+          <div class="label">${label}</div>
+          <div class="value">${value}</div>
+          <div class="hint">${hint}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderList() {
+      const arr = filteredRecords();
+      document.getElementById('listSubtitle').textContent = `当前显示 ${arr.length} 条；点击任意行查看详情。`;
+      const body = document.getElementById('announcementRows');
+      document.getElementById('emptyList').style.display = arr.length ? 'none' : 'block';
+      body.innerHTML = arr.map(r => {
+        const e = r.event || {};
+        const tags = [e.hedge_type, ...(e.instrument_type || []).slice(0,2), ...(e.underlying_asset || []).slice(0,2)].filter(Boolean);
+        const tipTags = (e.tips || []).slice(0,3).map(t => `<span class="tag ${t.level}">${t.title}</span>`).join('');
+        const rowClass = selectedId === r.id ? 'data-row selected' : 'data-row';
+        return `
+          <tr class="${rowClass}" data-id="${r.id}">
+            <td><b>${r.date || '—'}</b><br><span class="muted">${r.exchange || ''}</span></td>
+            <td><span class="company">${r.company || '—'}</span><br><span class="muted">${r.code || '—'}</span></td>
+            <td class="title-cell">${escapeHtml(r.title || '—')}<br><span class="muted">${r.source || 'manual'} · 分数 ${e.candidate_score ?? '—'}</span></td>
+            <td><div class="tag-row">${tags.map(x => `<span class="tag gray">${escapeHtml(x)}</span>`).join('') || '<span class="muted">—</span>'}</div></td>
+            <td class="amount">${formatAmount(e.contract_value_limit, e.contract_value_currency)}<br><span class="muted">${e.contract_value_raw_text || ''}</span></td>
+            <td><div class="tag-row">${tipTags || '<span class="tag gray">无提示</span>'}</div></td>
+            <td><b>${pct(e.confidence)}</b><br>${e.need_review ? '<span class="tag review">需确认</span>' : '<span class="tag good">较稳定</span>'}</td>
+          </tr>
+        `;
+      }).join('');
+      body.querySelectorAll('tr.data-row').forEach(tr => {
+        tr.addEventListener('click', () => {
+          selectedId = tr.dataset.id;
+          render();
+          document.getElementById('detailPanel').scrollIntoView({block:'start', behavior:'smooth'});
+        });
+      });
+    }
+
+    function renderDetail() {
+      const r = getAnalyzedRecords().find(x => x.id === selectedId);
+      const el = document.getElementById('detailBody');
+      if (!r) {
+        el.innerHTML = '<div class="empty">请选择一条公告。</div>';
+        return;
+      }
+      const e = r.event || {};
+      const tips = (e.tips || []).map(t => `
+        <div class="evidence">
+          <span class="tag ${t.level}">${t.title}</span>
+          <div style="margin-top:8px;">${escapeHtml(t.message)}</div>
+          <div class="small">触发字段：${escapeHtml(t.field || '—')} / ${escapeHtml(t.value || '—')}</div>
+        </div>`).join('') || '<div class="small">无提示。</div>';
+      const evidence = (e.evidence || []).map(ev => {
+        const quote = highlightKeywords(ev.quote || '', [e.contract_value_raw_text, ...(e.instrument_type || []), ...(e.underlying_asset || []), '股东大会', '董事会', '亏损', '浮亏'].filter(Boolean));
+        return `<div class="evidence"><span class="tag info">${escapeHtml(ev.field)}</span> <span class="muted">第 ${ev.page_no || 1} 页</span><div style="margin-top:8px;">${quote}</div></div>`;
+      }).join('') || '<div class="small">暂无证据句。</div>';
+
+      const pdfText = buildPdfPreview(r, e);
+      el.innerHTML = `
+        <div class="tag-row">
+          <span class="tag info">${escapeHtml(e.hedge_type || '未识别')}</span>
+          <span class="tag ${e.need_review ? 'review' : 'good'}">${e.need_review ? '需确认' : '较稳定'}</span>
+          <span class="tag gray">置信度 ${pct(e.confidence)}</span>
+        </div>
+        <div class="detail-title">${escapeHtml(r.title || '—')}</div>
+        <div class="muted">${escapeHtml(r.company || '—')}（${escapeHtml(r.code || '—')}） · ${escapeHtml(r.date || '—')} · ${escapeHtml(r.source || 'manual')}</div>
+
+        <div class="section">
+          <h3>结构化字段</h3>
+          <div class="kv">
+            <div class="k">套保类型</div><div>${escapeHtml(e.hedge_type || '—')}</div>
+            <div class="k">交易工具</div><div>${escapeHtml((e.instrument_type || []).join('、') || '—')}</div>
+            <div class="k">标的品种</div><div>${escapeHtml((e.underlying_asset || []).join('、') || '—')}</div>
+            <div class="k">风险类型</div><div>${escapeHtml((e.risk_type || []).join('、') || '—')}</div>
+            <div class="k">最高合约价值</div><div>${formatAmount(e.contract_value_limit, e.contract_value_currency)} <span class="muted">${escapeHtml(e.contract_value_raw_text || '')}</span></div>
+            <div class="k">保证金/权利金</div><div>${formatAmount(e.margin_limit, e.margin_currency)} <span class="muted">${escapeHtml(e.margin_raw_text || '')}</span></div>
+            <div class="k">授权期限</div><div>${escapeHtml(e.authorization_period || '—')}</div>
+            <div class="k">审批层级</div><div>${escapeHtml(e.approval_level || '—')}</div>
+            <div class="k">是否非套保</div><div>${e.is_non_hedging_speculation ? '是' : '否 / 未见明确表述'}</div>
+            <div class="k">亏损表述</div><div>${e.has_loss_disclosure ? '有' : '未见明显亏损表述'}</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>提示标签</h3>
+          ${tips}
+        </div>
+
+        <div class="section">
+          <h3>字段证据</h3>
+          ${evidence}
+        </div>
+
+        <div class="section">
+          <h3>模拟 PDF 预览</h3>
+          <div class="fake-pdf"><div class="pdf-page">${pdfText}</div></div>
+        </div>
+      `;
+    }
+
+    function buildPdfPreview(r, e) {
+      const pages = r.pages && r.pages.length ? r.pages : [r.text || ''];
+      return pages.map((p, idx) => {
+        let text = escapeHtml(p);
+        (e.evidence || []).filter(ev => ev.page_no === idx + 1).forEach(ev => {
+          const q = escapeHtml(ev.quote || '');
+          if (q && text.includes(q)) text = text.replace(q, `<span class="highlight">${q}</span>`);
+        });
+        return `第 ${idx + 1} 页\n${text}`;
+      }).join('\n\n');
+    }
+
+    function highlightKeywords(text, words) {
+      let out = escapeHtml(text || '');
+      [...new Set(words.filter(Boolean))].forEach(w => {
+        const esc = escapeHtml(w);
+        if (esc.length > 1) out = out.replaceAll(esc, `<mark>${esc}</mark>`);
+      });
+      return out;
+    }
+
+    function renderAnnual() {
+      const records = getAnalyzedRecords().filter(r => r.event?.annual?.has_hedging);
+      const el = document.getElementById('annualSummary');
+      if (!records.length) {
+        el.innerHTML = '<div class="empty">暂无年报披露样例。</div>';
+        return;
+      }
+      el.innerHTML = records.map(r => {
+        const a = r.event.annual;
+        return `
+          <div class="evidence">
+            <div class="tag-row">
+              <span class="tag info">${escapeHtml(a.report_year || '年度')} 年报</span>
+              <span class="tag ${r.event.need_review ? 'review' : 'good'}">${r.event.need_review ? '待核对' : '已识别'}</span>
+            </div>
+            <div style="font-weight:850; margin-top:8px;">${escapeHtml(r.company)}（${escapeHtml(r.code)}）</div>
+            <div class="kv" style="margin-top:8px;">
+              <div class="k">衍生金融资产</div><div>${formatAmount(a.derivative_assets, 'CNY')} <span class="muted">${escapeHtml(a.derivative_assets_raw || '')}</span></div>
+              <div class="k">衍生金融负债</div><div>${formatAmount(a.derivative_liabilities, 'CNY')} <span class="muted">${escapeHtml(a.derivative_liabilities_raw || '')}</span></div>
+              <div class="k">公允价值变动</div><div>${formatAmount(a.fair_value_change_gain_loss, 'CNY')} <span class="muted">${escapeHtml(a.fair_value_raw || '')}</span></div>
+            </div>
+            <div class="small" style="margin-top:8px;">${escapeHtml((a.description || []).join(' '))}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    }
+
+    function renderClock() {
+      const d = new Date();
+      document.getElementById('clock').textContent = `本地时间：${d.toLocaleString('zh-CN', {hour12:false})}`;
+    }
+
+    function render() {
+      renderStats();
+      renderList();
+      renderDetail();
+      renderAnnual();
+      renderClock();
+    }
+
+    function download(filename, content, mime) {
+      const blob = new Blob([content], {type: mime});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportJson() {
+      download(`hedge-monitor-export-${today()}.json`, JSON.stringify(getAnalyzedRecords(), null, 2), 'application/json;charset=utf-8');
+    }
+
+    function exportCsv() {
+      const rows = getAnalyzedRecords().map(r => {
+        const e = r.event || {};
+        return [
+          r.date, r.code, r.company, r.title, e.hedge_type,
+          (e.instrument_type || []).join('|'), (e.underlying_asset || []).join('|'),
+          e.contract_value_limit || '', e.contract_value_currency || '', e.contract_value_raw_text || '',
+          e.margin_limit || '', e.margin_currency || '', e.approval_level || '', e.authorization_period || '',
+          e.confidence == null ? '' : e.confidence.toFixed(2), e.need_review ? '是' : '否',
+          (e.tips || []).map(t => t.title).join('|')
+        ];
+      });
+      const header = ['日期','代码','公司','标题','套保类型','交易工具','标的品种','最高合约价值','币种','金额原文','保证金/权利金','保证金币种','审批层级','授权期限','置信度','需确认','提示'];
+      const csv = [header, ...rows].map(row => row.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+      download(`hedge-monitor-export-${today()}.csv`, '\ufeff' + csv, 'text/csv;charset=utf-8');
+    }
+
+    function addAnnouncement() {
+      const code = document.getElementById('newCode').value.trim();
+      const company = document.getElementById('newCompany').value.trim();
+      const title = document.getElementById('newTitle').value.trim();
+      const date = document.getElementById('newDate').value || today();
+      const source = document.getElementById('newSource').value;
+      const text = document.getElementById('newText').value.trim();
+      if (!title || !text) { toast('请至少填写公告标题和正文。'); return; }
+      const pages = text.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+      const record = analyzeRecord({
+        id: `manual-${Date.now()}`,
+        date, code: code || '未填', company: company || '未填公司', exchange: 'MANUAL', source, title, text, pages: pages.length ? pages : [text]
+      });
+      state.records.unshift(record);
+      selectedId = record.id;
+      saveState();
+      render();
+      toast('已新增并完成抽取。');
+    }
+
+    function fillSampleText() {
+      document.getElementById('newCode').value = '600123';
+      document.getElementById('newCompany').value = '测试股份';
+      document.getElementById('newTitle').value = '测试股份关于开展外汇套期保值业务的公告';
+      document.getElementById('newDate').value = today();
+      document.getElementById('newText').value = '第一页：为降低汇率波动对公司出口业务的影响，公司拟开展外汇套期保值业务，交易工具包括远期结售汇、外汇远期和外汇期权。\n\n第二页：预计任一交易日持有的最高合约价值不超过人民币8亿元，保证金和权利金上限不超过人民币5000万元。\n\n第三页：授权期限为董事会审议通过之日起12个月。本事项已经董事会审议通过，无需提交股东大会审议。公司不进行以投机为目的的衍生品交易。';
+    }
+
+    function importJson(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          if (!Array.isArray(data)) throw new Error('JSON 须为数组');
+          state.records = data.map((x, i) => analyzeRecord({
+            id: x.id || `import-${Date.now()}-${i}`,
+            date: x.date || x.announcement_date || today(),
+            code: x.code || x.stock_code || '',
+            company: x.company || x.stock_name || '',
+            exchange: x.exchange || '',
+            source: x.source || 'import',
+            title: x.title || '',
+            text: x.text || x.content || '',
+            pages: x.pages || [x.text || x.content || '']
+          }));
+          selectedId = state.records[0]?.id || null;
+          saveState();
+          render();
+          toast(`已导入 ${state.records.length} 条记录。`);
+        } catch (e) {
+          toast(`导入失败：${e.message}`);
+        }
+      };
+      reader.readAsText(file, 'utf-8');
+    }
+
+    document.getElementById('runPipelineBtn').addEventListener('click', analyzeAll);
+    document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+    document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      if (!confirm('确认恢复内置样例？这会覆盖本地新增数据。')) return;
+      state = { records: sampleAnnouncements.map(x => ({...x})) };
+      selectedId = state.records[0]?.id || null;
+      analyzeAll();
+      toast('已恢复内置样例。');
+    });
+    document.getElementById('clearFiltersBtn').addEventListener('click', () => {
+      ['searchInput','typeFilter','tipFilter','reviewFilter'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('sortSelect').value = 'date_desc';
+      render();
+    });
+    ['searchInput','typeFilter','tipFilter','reviewFilter','sortSelect'].forEach(id => document.getElementById(id).addEventListener('input', render));
+    document.getElementById('addAnnouncementBtn').addEventListener('click', addAnnouncement);
+    document.getElementById('fillSampleTextBtn').addEventListener('click', fillSampleText);
+    document.getElementById('importJson').addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      if (file) importJson(file);
+      e.target.value = '';
+    });
+
+    if (!state.records.every(r => r.event)) state.records = state.records.map(r => analyzeRecord(r));
+    saveState();
+    render();
+    setInterval(renderClock, 1000);
+
+    // ===== Supabase 桥接（追加，未改动原逻辑） =====
+    window.__supabase = { client: null, url: '', key: '' };
+
+    function supabaseEnsureClient() {
+      if (window.__supabase.client) return window.__supabase.client;
+      const url = (document.getElementById('sbUrl')?.value || localStorage.getItem('SUPABASE_URL') || '').trim();
+      const key = (document.getElementById('sbAnonKey')?.value || localStorage.getItem('SUPABASE_ANON_KEY') || '').trim();
+      if (!url || !key) { toast('请先填写 Supabase URL 和 anon key。'); return null; }
+      if (typeof supabase === 'undefined') { toast('Supabase SDK 未加载，请检查网络。'); return null; }
+      localStorage.setItem('SUPABASE_URL', url);
+      localStorage.setItem('SUPABASE_ANON_KEY', key);
+      window.__supabase.client = supabase.createClient(url, key);
+      return window.__supabase.client;
+    }
+
+    function supabaseRestoreConfig() {
+      const u = document.getElementById('sbUrl');
+      const k = document.getElementById('sbAnonKey');
+      if (u && !u.value) u.value = localStorage.getItem('SUPABASE_URL') || '';
+      if (k && !k.value) k.value = localStorage.getItem('SUPABASE_ANON_KEY') || '';
+    }
+
+    function supabaseToRecord(row) {
+      const title = row.title || '';
+      const code = row.sec_code || '';
+      const company = row.sec_name || '';
+      let date = '';
+      if (row.publish_time) {
+        try { date = new Date(row.publish_time).toISOString().slice(0, 10); } catch(e) { date = String(row.publish_time).slice(0, 10); }
+      }
+      const exchange = (code || '').startsWith('6') ? 'SSE'
+                    : (code || '').startsWith('0') || (code || '').startsWith('3') ? 'SZSE'
+                    : (code || '').startsWith('8') || (code || '').startsWith('4') ? 'BSE' : '';
+      const text = [
+        title,
+        row.hedge_type ? ('套保类型：' + row.hedge_type) : '',
+        Array.isArray(row.instrument_type) && row.instrument_type.length ? ('交易工具：' + row.instrument_type.join('、')) : '',
+        Array.isArray(row.risk_type) && row.risk_type.length ? ('风险类型：' + row.risk_type.join('、')) : '',
+        row.contract_value_raw_text ? ('原文：' + row.contract_value_raw_text) : '',
+        row.pdf_url ? ('PDF：' + row.pdf_url) : '',
+      ].filter(Boolean).join('\n');
+      return {
+        id: 'sb-' + (row.announcement_id || Math.random().toString(36).slice(2)),
+        date, code, company, exchange, source: row.source || 'supabase',
+        title, text, pages: text ? text.split(/\n+/).filter(Boolean) : [],
+        pdf_url: row.pdf_url || '',
+        confidence: row.confidence,
+        need_review: row.need_review,
+        hedge_type_db: row.hedge_type,
+      };
+    }
+
+    async function supabaseLoadAnnouncements() {
+      const c = supabaseEnsureClient(); if (!c) return;
+      toast('正在从 Supabase 加载真实公告…');
+      const limit = Math.max(1, Math.min(1000, Number(document.getElementById('sbLimit')?.value || 200)));
+      const { data, error } = await c.from('v_announcements_with_events')
+        .select('*').order('publish_time', { ascending: false }).limit(limit);
+      if (error) { toast('加载失败：' + error.message); return; }
+      const mapped = (data || []).map(supabaseToRecord);
+      const seen = new Set(state.records.map(r => r.id));
+      let added = 0;
+      for (const r of mapped) { if (!seen.has(r.id)) { state.records.push(r); added++; } }
+      state.records = state.records.map(r => r.event ? r : analyzeRecord(r));
+      selectedId = state.records[0]?.id || null;
+      saveState();
+      render();
+      toast(`已从 Supabase 加载 ${mapped.length} 条，新增 ${added} 条。`);
+    }
+
+    async function supabaseLoadAnnual() {
+      const c = supabaseEnsureClient(); if (!c) return;
+      toast('正在从 Supabase 加载年报…');
+      const { data, error } = await c.from('annual_reports')
+        .select('*').order('publish_time', { ascending: false }).limit(200);
+      if (error) { toast('加载失败：' + error.message); return; }
+      const mapped = (data || []).map(supabaseToRecord);
+      const seen = new Set(state.records.map(r => r.id));
+      let added = 0;
+      for (const r of mapped) { if (!seen.has(r.id)) { state.records.push(r); added++; } }
+      state.records = state.records.map(r => r.event ? r : analyzeRecord(r));
+      selectedId = state.records[0]?.id || null;
+      saveState();
+      render();
+      toast(`已从 Supabase 加载年报 ${mapped.length} 条，新增 ${added} 条。`);
+    }
+
+    supabaseRestoreConfig();
+  </script>
+
+  <!-- Supabase JS SDK（追加） -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Supabase 连接面板（追加） -->
+  <div id="sbPanel" style="display:none; position:fixed; right:20px; bottom:20px; z-index:200; max-width:420px; background:rgba(255,255,255,.96); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 18px 50px rgba(15,23,42,.18); backdrop-filter:blur(12px);">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+      <b style="font-size:14px;">🔌 Supabase 真实数据</b>
+      <button onclick="document.getElementById('sbPanel').style.display='none'" style="background:transparent; border:0; color:var(--muted); font-size:18px; cursor:pointer;">×</button>
+    </div>
+    <input id="sbUrl" placeholder="https://xxxx.supabase.co" style="width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:10px; font-size:13px; margin-bottom:8px; box-sizing:border-box;" />
+    <input id="sbAnonKey" placeholder="eyJ...（anon public key，不要填 service_role）" style="width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:10px; font-size:13px; margin-bottom:8px; box-sizing:border-box;" />
+    <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+      <label style="font-size:12px; color:var(--muted);">条数</label>
+      <input id="sbLimit" type="number" value="200" min="1" max="1000" style="flex:1; padding:7px 9px; border:1px solid var(--line); border-radius:10px; font-size:13px;" />
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button onclick="supabaseLoadAnnouncements()" style="background:linear-gradient(135deg,#2563eb,#7c3aed); color:#fff; border:0; padding:9px 12px; border-radius:10px; font-weight:700; cursor:pointer; font-size:13px;">加载公告</button>
+      <button onclick="supabaseLoadAnnual()" style="background:#eef2ff; color:#3730a3; border:0; padding:9px 12px; border-radius:10px; font-weight:700; cursor:pointer; font-size:13px;">加载年报</button>
+    </div>
+    <div style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.6;">⚠️ 这里只能填 anon key。service_role 只能放在 Python 的 .env 或 GitHub Secrets。</div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const fab = document.createElement('button');
+      fab.innerHTML = '🔌 Supabase';
+      fab.title = '从 Supabase 加载真实公告';
+      fab.style.cssText = 'position:fixed; right:20px; bottom:20px; z-index:199; background:linear-gradient(135deg,#2563eb,#7c3aed); color:#fff; border:0; padding:12px 16px; border-radius:999px; font-weight:800; cursor:pointer; box-shadow:0 12px 28px rgba(37,99,235,.32); font-size:13px;';
+      fab.onclick = () => {
+        const p = document.getElementById('sbPanel');
+        p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
+        fab.style.display = (p.style.display === 'block') ? 'none' : 'block';
+        supabaseRestoreConfig();
+      };
+      document.body.appendChild(fab);
+      const obs = new MutationObserver(() => {
+        const p = document.getElementById('sbPanel');
+        if (p && p.style.display === 'none') fab.style.display = 'block';
+      });
+      setTimeout(() => {
+        const p = document.getElementById('sbPanel');
+        if (p) obs.observe(p, { attributes: true, attributeFilter: ['style'] });
+      }, 100);
+    });
+  </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
