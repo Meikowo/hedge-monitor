@@ -1210,6 +1210,16 @@
     }
 
     supabaseRestoreConfig();
+    (function autoPrefill(){
+      try {
+        localStorage.setItem('SUPABASE_URL', 'https://cdxouozlopsznhytcnvy.supabase.co');
+        localStorage.setItem('SUPABASE_ANON_KEY', 'sb_publishable_ObKwAZf2gaHByk2lPjsCgA_znIeZPAI');
+        const u = document.getElementById('sbUrl');
+        const k = document.getElementById('sbAnonKey');
+        if (u) u.value = 'https://cdxouozlopsznhytcnvy.supabase.co';
+        if (k) k.value = 'sb_publishable_ObKwAZf2gaHByk2lPjsCgA_znIeZPAI';
+      } catch(e) {}
+    })();
   </script>
 
   <!-- Supabase JS SDK（追加） -->
