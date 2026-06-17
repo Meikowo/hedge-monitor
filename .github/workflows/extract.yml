@@ -1,0 +1,39 @@
+name: Extract Hedging Fields (LLM)
+
+# 抽取近期待抽取公告的结构化字段。建议跟在 daily 采集之后跑。
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '本次最多抽取条数'
+        required: false
+        default: '40'
+  schedule:
+    - cron: '0 0 * * *'   # 北京时间 08:00,抽前一晚采集到的新公告
+
+concurrency:
+  group: cninfo-extract
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run extraction
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: https://api.minimaxi.com/v1
+          LLM_MODEL: MiniMax-M3
+          EXTRACT_LIMIT: ${{ github.event.inputs.limit || '40' }}
+        run: python scripts/extract_pipeline.py --limit "$EXTRACT_LIMIT"
