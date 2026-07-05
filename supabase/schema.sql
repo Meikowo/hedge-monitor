@@ -55,8 +55,15 @@ create table if not exists public.hedge_events (
   contract_value_limit numeric,
   contract_value_currency text,
   contract_value_raw_text text,
+  contract_value_basis text,          -- 额度口径: 保证金最高占用额 / 业务总额 / 合约价值
+  trade_venue text,                   -- 交易场所: 境内 / 境外 / 境内外
+  is_revolving boolean,               -- 是否循环额度
+  use_own_funds boolean,              -- 是否使用自有资金
+  is_hedging_announcement boolean default true,  -- 是否为实质开展公告
   confidence numeric,
   need_review boolean default false,
+  extracted_at timestamptz,           -- 真抽取时间
+  pdf_storage_path text,              -- Supabase Storage 留档路径
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -135,6 +142,8 @@ to anon, authenticated
 using (true);
 
 -- 方便前端一次性读取公告 + 事件信息
+-- 注意: 线上已有 companies 表时,视图在 02_companies.sql 中被覆盖增强版替代
+-- 此处保留最小可用版,供首次初始化使用
 create or replace view public.v_announcements_with_events as
 select
   a.id,
@@ -150,10 +159,18 @@ select
   e.underlying_asset,
   e.risk_type,
   e.approval_level,
+  e.authorization_period,
   e.contract_value_limit,
   e.contract_value_currency,
   e.contract_value_raw_text,
+  e.contract_value_basis,
+  e.trade_venue,
+  e.is_revolving,
+  e.use_own_funds,
+  e.is_hedging_announcement,
   e.confidence,
-  e.need_review
+  e.need_review,
+  e.extracted_at,
+  e.pdf_storage_path
 from public.announcements a
 left join public.hedge_events e on e.announcement_id = a.announcement_id;
