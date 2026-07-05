@@ -133,8 +133,8 @@ def write_back(client, event_row: dict, evidence_rows: list[dict], storage_path:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=30)
-    ap.add_argument("--since", help="只抽该日期后发布的公告 YYYY-MM-DD")
+    ap.add_argument("--limit", type=int, default=200, help="每轮最多抽取条数")
+    ap.add_argument("--since", help="只抽该日期后发布的公告 YYYY-MM-DD（留空则抽全部未抽取）")
     ap.add_argument("--dry-run", action="store_true", help="抽取但不回写,只打印结果")
     ap.add_argument("--no-storage", action="store_true", help="不上传PDF到Storage")
     args = ap.parse_args()

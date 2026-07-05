@@ -8,8 +8,8 @@ on:
         required: false
         default: '3'
   schedule:
-    # UTC 12:30 ≈ 北京时间 20:30。公告晚间较多，可按需调整。
-    - cron: '30 12 * * *'
+    # UTC 19:00 = 北京时间次日 03:00，一次抓全前一整天
+    - cron: '0 19 * * *'
 
 jobs:
   crawl:

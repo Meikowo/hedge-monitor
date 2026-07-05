@@ -1,15 +1,19 @@
 name: Extract Hedging Fields (LLM)
 
-# 抽取近期待抽取公告的结构化字段。建议跟在 daily 采集之后跑。
+# 每日自动抽取 + 手动批量抽取（回填历史数据后清零积压用）
+# 手动触发时可反复点，直到积压清零。
 on:
   workflow_dispatch:
     inputs:
       limit:
         description: '本次最多抽取条数'
         required: false
-        default: '40'
+        default: '200'
+      since:
+        description: '只抽该日期后发布的公告 YYYY-MM-DD（留空则抽全部未抽取）'
+        required: false
   schedule:
-    - cron: '0 0 * * *'   # 北京时间 08:00,抽前一晚采集到的新公告
+    - cron: '0 0 * * *'   # 北京时间 08:00，抽前一晚采集到的新公告
 
 concurrency:
   group: cninfo-extract
@@ -18,7 +22,7 @@ concurrency:
 jobs:
   extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360  # 6 小时上限，大批量抽取时够用
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -35,5 +39,9 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: https://api.minimaxi.com/v1
           LLM_MODEL: MiniMax-M3
-          EXTRACT_LIMIT: ${{ github.event.inputs.limit || '40' }}
-        run: python scripts/extract_pipeline.py --limit "$EXTRACT_LIMIT"
+        run: |
+          CMD="python scripts/extract_pipeline.py --limit ${{ github.event.inputs.limit || '200' }}"
+          if [ -n "${{ github.event.inputs.since }}" ]; then
+            CMD="$CMD --since ${{ github.event.inputs.since }}"
+          fi
+          $CMD
