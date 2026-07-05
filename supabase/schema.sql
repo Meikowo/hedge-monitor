@@ -144,7 +144,9 @@ using (true);
 -- 方便前端一次性读取公告 + 事件信息
 -- 注意: 线上已有 companies 表时,视图在 02_companies.sql 中被覆盖增强版替代
 -- 此处保留最小可用版,供首次初始化使用
-create or replace view public.v_announcements_with_events as
+-- 用 DROP + CREATE 而非 OR REPLACE,避免 PostgreSQL 在列变动时报 "cannot change name of view column"
+drop view if exists public.v_announcements_with_events;
+create view public.v_announcements_with_events as
 select
   a.id,
   a.announcement_id,
