@@ -53,29 +53,42 @@ def get_client():
 
 def fetch_pending(client, limit: int, since: str | None) -> list[dict]:
     """取 is_candidate 且尚未真抽取(extracted_at is null)的公告。
-    依赖 hedge_events.extracted_at 列(见 03_extraction.sql)。"""
-    q = (client.table("announcements")
-         .select("announcement_id, sec_code, sec_name, title, pdf_url, "
-                 "hedge_events(extracted_at)")
-         .eq("is_candidate", True)
-         .order("publish_time", desc=True)
-         .limit(limit * 3))  # 多取些,过滤掉已抽的后再截断
-    if since:
-        q = q.gte("publish_time", since)
-    rows = q.execute().data or []
-    pending = []
-    for r in rows:
-        he = r.get("hedge_events")
-        # he 可能是 list / dict / None,取决于关系基数;统一判断 extracted_at
-        already = False
-        if isinstance(he, list):
-            already = any((x or {}).get("extracted_at") for x in he)
-        elif isinstance(he, dict):
-            already = bool(he.get("extracted_at"))
-        if not already and r.get("pdf_url"):
-            pending.append(r)
-        if len(pending) >= limit:
+    依赖 hedge_events.extracted_at 列(见 03_extraction_addon.sql)。
+
+    v2 修复: 原版 .limit(limit*3) 一次取数, 受 PostgREST 单次 1000 行上限约束——
+    历史回填(M2)入库后, 最新的几千行大多已抽取, 单次取数会被已抽行占满,
+    导致 --limit 给大了也抽不满、甚至取不到积压。改为按 publish_time 倒序
+    深分页(range)遍历, 直到凑满 limit 条或翻完全表。"""
+    page_size = 1000  # PostgREST 单次上限
+    offset = 0
+    pending: list[dict] = []
+    while len(pending) < limit:
+        q = (client.table("announcements")
+             .select("announcement_id, sec_code, sec_name, title, pdf_url, "
+                     "hedge_events(extracted_at)")
+             .eq("is_candidate", True)
+             .order("publish_time", desc=True)
+             .range(offset, offset + page_size - 1))
+        if since:
+            q = q.gte("publish_time", since)
+        rows = q.execute().data or []
+        if not rows:
             break
+        for r in rows:
+            he = r.get("hedge_events")
+            # he 可能是 list / dict / None,取决于关系基数;统一判断 extracted_at
+            already = False
+            if isinstance(he, list):
+                already = any((x or {}).get("extracted_at") for x in he)
+            elif isinstance(he, dict):
+                already = bool(he.get("extracted_at"))
+            if not already and r.get("pdf_url"):
+                pending.append(r)
+                if len(pending) >= limit:
+                    break
+        if len(rows) < page_size:
+            break
+        offset += page_size
     return pending
 
 

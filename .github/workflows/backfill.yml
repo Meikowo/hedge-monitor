@@ -12,6 +12,12 @@ on:
         description: '标题关键词（空格分隔，留空用默认）'
         required: false
 
+# 同一时间只允许一个回填在跑：多个年份并行会双倍请求巨潮，极易触发风控封 IP。
+# 后触发的会排队等待，不会被取消。
+concurrency:
+  group: cninfo-backfill
+  cancel-in-progress: false
+
 jobs:
   backfill:
     runs-on: ubuntu-latest

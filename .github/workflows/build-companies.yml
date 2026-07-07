@@ -1,0 +1,43 @@
+name: Build Companies Dimension
+
+# 手动触发：从 akshare 拉全市场公司基础信息（东财行业/板块/上市日期）灌入 companies 表。
+# 幂等，可随时重跑刷新（如季度更新一次行业与名称变更）。
+# akshare 依赖较重，只在本 workflow 安装，不写进 requirements.txt 拖慢日常任务。
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '试运行（只打印统计，不写库）'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: build-companies
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt akshare pandas
+
+      - name: Build companies
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python scripts/build_companies.py --dry-run
+          else
+            python scripts/build_companies.py
+          fi

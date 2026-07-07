@@ -191,9 +191,12 @@ def to_hedge_event_row(announcement_id: str, extracted: dict) -> dict:
     if isinstance(limit, str):
         limit = float(re.sub(r"[^\d.]", "", limit) or 0) or None
 
+    # v2: 制度/可行性/进展/平仓类(is_hedging_announcement=false)本就没有额度,
+    # 不应因 limit 为空进复核队列——否则回填历史后队列被非事件公告淹没。
+    is_hedging = extracted.get("is_hedging_announcement")
     need_review = (
         (conf is not None and conf < 0.75)
-        or limit is None
+        or (limit is None and is_hedging is not False)
         or not extracted.get("hedge_type")
     )
 
