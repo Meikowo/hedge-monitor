@@ -1,292 +1,303 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-从 akshare 拉取 A 股公司基础信息，灌入 Supabase companies 表。
-v2 修复与增强（2026-07-07）：
-  1) 行业覆盖：原版只有深市/北交所有行业（沪市+科创板 ~2300 家为空）。
-     现在用东方财富行业板块（~86 个一级行业）给【全市场】统一打行业标签，
-     粒度远优于证监会门类（"C 制造业"一类占全市场 4 成，筛选没有意义）；
-     东财缺失的个股回落到交易所接口的证监会行业。
-  2) 幂等语义：原版 on conflict do nothing —— 表里已有行（哪怕字段是空的）
-     永远不会被更新，导致先跑过数据 SQL 后脚本形同虚设。
-     现在改为 do update，且【无行业的行分组单独写】，绝不会用 None 把已有值洗掉；
-     ent_type / org_id / market_cap 不在写入列里，永远不会被本脚本触碰。
-  3) 日期序列化：date 对象直接传 supabase-py 会抛 "not JSON serializable"，
-     现在统一转 ISO 字符串。
-  4) 新增 --emit-sql：把结果导出成幂等 SQL 文件（ON CONFLICT 补空不覆盖），
-     供无法跑 Python 时在 Supabase SQL Editor 手工执行。
+build_companies.py -- 构建 / 刷新 companies 维表 (v3, 海外 Runner 友好版)
+=========================================================================
 
-用法:
-  python scripts/build_companies.py                       # 拉数据并写入 Supabase
-  python scripts/build_companies.py --dry-run             # 只打印统计，不写库
-  python scripts/build_companies.py --emit-sql out.sql    # 另存为幂等 SQL
-  python scripts/build_companies.py --skip-em             # 跳过东财行业(网络差时)
+v2 -> v3 改动背景
+-----------------
+v2 的基础列表用 ak.stock_info_a_code_name(), 该接口逐个请求深交所 / 上交所 /
+北交所官网。交易所官网对海外 IP (GitHub Actions runner 在 Azure 美国机房)
+经常在 TLS 握手阶段直接重置连接, 表现为:
+    ConnectionResetError(104, 'Connection reset by peer')
+本地 (国内网络) 无法复现, 只在 Actions 上暴露。
 
-依赖: pip install akshare pandas supabase python-dotenv
+v3 数据源与写库策略
+-------------------
+1. 基础列表: 东方财富为主源 (海外可达, 与巨潮同属放行侧);
+   交易所官网降级为兜底 (本地国内网络运行时仍可用)。
+2. 行业口径: 东方财富行业板块 (细分, 约 86 个)。东财覆盖不到的
+   (主要是部分北交所) 保留库中已有门类 —— 补空不覆盖, 绝不用空值回写。
+3. 写库: Supabase PostgREST 批量 upsert (on_conflict=sec_code)。
+   写之前自动探测 companies 表实际存在的列, 只写交集, 避免列名不符导致 400。
+4. 全部网络调用带指数退避重试; 读库用深分页 (规避 PostgREST 1000 行上限)。
+
+用法
+----
+    python scripts/build_companies.py               # 全量 (基础列表 + 东财行业)
+    python scripts/build_companies.py --skip-em     # 跳过东财行业, 仅同步代码/名称
+    python scripts/build_companies.py --dry-run     # 不写库, 输出 companies_preview.csv
+
+环境变量
+--------
+    SUPABASE_URL
+    SUPABASE_SERVICE_ROLE_KEY  (或 SUPABASE_KEY)
 """
+
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import os
+import random
 import sys
 import time
-from pathlib import Path
 
-import akshare as ak
 import pandas as pd
-from dotenv import load_dotenv
+import requests
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+try:
+    import akshare as ak
+except ImportError:  # pragma: no cover
+    print("缺少依赖 akshare: pip install akshare", file=sys.stderr)
+    raise
 
-
-# ----------------------------- Supabase -----------------------------
-def get_client():
-    load_dotenv(ROOT / ".env")
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key:
-        raise RuntimeError("缺少 SUPABASE_URL 或 SUPABASE_SERVICE_ROLE_KEY")
-    from supabase import create_client
-    return create_client(url, key)
+# GitHub Actions 上让日志实时刷出来, 方便盯进度
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 
-# ----------------------------- 板块推断 -----------------------------
-def infer_plate_from_code(code: str) -> str | None:
-    """根据代码前缀推断板块（上海/北京无板块列时兜底）。"""
-    c = str(code).strip()
-    if c.startswith("688"):
-        return "科创板"
-    if c.startswith("60"):
-        return "主板"
-    if c.startswith(("300", "301", "302")):
-        return "创业板"
-    if c.startswith("00"):
-        return "主板"
-    if c.startswith(("43", "83", "87", "88", "92")):
-        return "北交所"
-    return None
-
-
-# ----------------------------- 东财行业（全市场统一口径） -----------------------------
-def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
-
-
-def fetch_em_industry_map(sleep_sec: float = 0.4) -> dict[str, str]:
-    """东方财富行业板块 -> {股票代码: 行业名}。约 86 个板块、逐板块取成分。
-    单板块失败只警告不中断；整体失败返回空 dict（上层回落到证监会行业）。"""
-    code2ind: dict[str, str] = {}
-    try:
-        boards = ak.stock_board_industry_name_em()
-    except Exception as e:
-        print(f"  [warn] 东财行业板块列表拉取失败，将只用证监会行业: {e}")
-        return code2ind
-
-    name_col = _pick_col(boards, ["板块名称", "板块名"])
-    if not name_col:
-        print(f"  [warn] 东财板块列缺失(实际列: {list(boards.columns)})，跳过")
-        return code2ind
-
-    names = [str(x).strip() for x in boards[name_col].dropna().tolist()]
-    print(f"[akshare] 东财行业板块共 {len(names)} 个，逐个取成分（约 1 分钟）...")
-    for i, name in enumerate(names, 1):
+# --------------------------------------------------------------------------- #
+# 通用重试
+# --------------------------------------------------------------------------- #
+def with_retry(fn, *args, _what: str = "", _tries: int = 4, _base: float = 4.0, **kwargs):
+    """指数退避重试。海外访问国内数据源, 偶发 RST / 超时属常态, 必须兜住。"""
+    last_err = None
+    for attempt in range(1, _tries + 1):
         try:
-            cons = ak.stock_board_industry_cons_em(symbol=name)
-            ccol = _pick_col(cons, ["代码", "股票代码"])
-            if not ccol:
-                continue
-            for code in cons[ccol].astype(str).str.strip().str.zfill(6):
-                # 个股可能出现在多个口径里；先到先得即可（东财一级行业互斥）
-                code2ind.setdefault(code, name)
+            return fn(*args, **kwargs)
+        except Exception as e:  # akshare 抛出的异常类型五花八门, 一律接住
+            last_err = e
+            if attempt == _tries:
+                break
+            wait = _base * (2 ** (attempt - 1)) + random.uniform(0.0, 2.0)
+            print(f"  [retry {attempt}/{_tries}] {_what} 失败: "
+                  f"{type(e).__name__}: {e} -> {wait:.0f}s 后重试")
+            time.sleep(wait)
+    raise RuntimeError(f"{_what} 重试 {_tries} 次仍失败: {last_err}") from last_err
+
+
+# --------------------------------------------------------------------------- #
+# 基础列表 (代码 + 名称)
+# --------------------------------------------------------------------------- #
+def _clean_base(df: pd.DataFrame, code_col: str, name_col: str) -> pd.DataFrame:
+    out = df[[code_col, name_col]].copy()
+    out.columns = ["sec_code", "name"]
+    out["sec_code"] = out["sec_code"].astype(str).str.strip().str.zfill(6)
+    out["name"] = out["name"].astype(str).str.strip()
+    out = out[out["sec_code"].str.fullmatch(r"\d{6}")]
+    out = out[out["name"] != ""]
+    return out.drop_duplicates(subset="sec_code").reset_index(drop=True)
+
+
+def fetch_base_list() -> pd.DataFrame:
+    """全 A 股列表。东财为主 (Actions 可达), 交易所官网兜底 (仅国内网络可达)。"""
+    try:
+        print("[base] 东方财富 沪深京 A 股列表 ...")
+        df = with_retry(ak.stock_zh_a_spot_em, _what="东财A股列表", _tries=3)
+        base = _clean_base(df, "代码", "名称")
+        # 个别 akshare 版本的合并快照不含北交所, 缺了就单独补一刀
+        if not base["sec_code"].str.startswith(("43", "83", "87", "88", "92")).any():
+            try:
+                print("[base] 快照未含北交所, 追加 stock_bj_a_spot_em ...")
+                bj = with_retry(ak.stock_bj_a_spot_em, _what="东财北交所列表", _tries=2)
+                base = pd.concat(
+                    [base, _clean_base(bj, "代码", "名称")], ignore_index=True
+                ).drop_duplicates(subset="sec_code").reset_index(drop=True)
+            except Exception as e:
+                print(f"  [warn] 北交所补充失败 (不阻断): {e}")
+        if len(base) < 4000:
+            raise RuntimeError(f"东财仅返回 {len(base)} 条, 疑似不完整")
+        print(f"[base] 东财 OK: {len(base)} 家")
+        return base
+    except Exception as e:
+        print(f"[base] 东财失败: {e}")
+
+    print("[base] 回退交易所官网接口 (注意: GitHub Actions 海外 IP 通常不可达) ...")
+    df = with_retry(ak.stock_info_a_code_name, _what="交易所官网列表", _tries=2)
+    base = _clean_base(df, "code", "name")
+    print(f"[base] 官网 OK: {len(base)} 家")
+    return base
+
+
+def classify_board(code: str):
+    """按代码前缀推断交易所 / 板块 (表里没有这两列时会被自动丢弃, 无副作用)。"""
+    if code.startswith(("600", "601", "603", "605")):
+        return "SH", "主板"
+    if code.startswith(("688", "689")):
+        return "SH", "科创板"
+    if code.startswith(("000", "001", "002", "003")):
+        return "SZ", "主板"
+    if code.startswith(("300", "301", "302")):
+        return "SZ", "创业板"
+    if code.startswith(("43", "83", "87", "88", "92")):
+        return "BJ", "北交所"
+    return None, None
+
+
+# --------------------------------------------------------------------------- #
+# 东财行业 (细分口径)
+# --------------------------------------------------------------------------- #
+def fetch_em_industry_map() -> dict:
+    boards = with_retry(ak.stock_board_industry_name_em,
+                        _what="东财行业板块列表", _tries=3)
+    names = boards["板块名称"].dropna().astype(str).tolist()
+    print(f"[industry] 东财行业板块 {len(names)} 个, 逐个拉成分 ...")
+    mapping: dict = {}
+    failed: list = []
+    for i, bname in enumerate(names, 1):
+        try:
+            cons = with_retry(ak.stock_board_industry_cons_em, symbol=bname,
+                              _what=f"行业成分[{bname}]", _tries=3, _base=3.0)
+            for c in cons["代码"].astype(str):
+                mapping[c.strip().zfill(6)] = bname
         except Exception as e:
-            print(f"  [warn] 板块「{name}」成分失败: {repr(e)[:60]}")
-        if i % 20 == 0:
-            print(f"  ... {i}/{len(names)}，已覆盖 {len(code2ind)} 只")
-        time.sleep(sleep_sec)
-    print(f"  东财行业覆盖 {len(code2ind)} 只个股")
-    return code2ind
+            failed.append(bname)
+            print(f"  [warn] 行业 [{bname}] 拉取失败, 跳过: {e}")
+        if i % 10 == 0 or i == len(names):
+            print(f"  [industry] 进度 {i}/{len(names)}, 已映射 {len(mapping)} 家")
+        time.sleep(0.6 + random.uniform(0.0, 0.6))  # 温和限速, 别惹东财风控
+    if failed:
+        print(f"[industry] {len(failed)} 个板块失败: {', '.join(failed[:8])} ...")
+    if len(mapping) < 4000:
+        raise RuntimeError(
+            f"东财行业映射仅覆盖 {len(mapping)} 家, 明显异常; "
+            "为避免写入半套口径, 本次中止 (直接重跑即可, 不会破坏现有数据)")
+    return mapping
 
 
-# ----------------------------- 交易所基础信息 -----------------------------
-def fetch_a_stock_info(skip_em: bool = False) -> pd.DataFrame:
-    print("[akshare] 拉取 A 股基础列表...")
-    df_main = ak.stock_info_a_code_name()
-    df_main.rename(columns={"code": "sec_code", "name": "sec_name"}, inplace=True)
-    df_main["sec_code"] = df_main["sec_code"].astype(str).str.strip().str.zfill(6)
-    df_main["sec_name"] = df_main["sec_name"].astype(str).str.strip()
-
-    # 上海：补充上市日期
-    print("[akshare] 拉取上海上市日期...")
-    try:
-        df_sh = ak.stock_info_sh_name_code()
-        df_sh = df_sh[["证券代码", "上市日期"]].copy()
-        df_sh.rename(columns={"证券代码": "sec_code", "上市日期": "list_date"}, inplace=True)
-        df_sh["sec_code"] = df_sh["sec_code"].astype(str).str.strip().str.zfill(6)
-        df_sh["list_date"] = pd.to_datetime(df_sh["list_date"], errors="coerce").dt.date
-        df_main = df_main.merge(df_sh, on="sec_code", how="left")
-    except Exception as e:
-        print(f"  [warn] 上海数据失败: {e}")
-        df_main["list_date"] = None
-
-    # 深圳：补充板块、证监会行业、上市日期
-    print("[akshare] 拉取深圳板块/行业/上市日期...")
-    try:
-        df_sz = ak.stock_info_sz_name_code()
-        df_sz = df_sz[["板块", "A股代码", "A股上市日期", "所属行业"]].copy()
-        df_sz.rename(columns={
-            "板块": "plate",
-            "A股代码": "sec_code",
-            "A股上市日期": "list_date_sz",
-            "所属行业": "csrc_industry",
-        }, inplace=True)
-        df_sz["sec_code"] = df_sz["sec_code"].astype(str).str.strip().str.zfill(6)
-        df_sz["list_date_sz"] = pd.to_datetime(df_sz["list_date_sz"], errors="coerce").dt.date
-        df_main = df_main.merge(df_sz, on="sec_code", how="left")
-        df_main["list_date"] = df_main["list_date_sz"].combine_first(df_main["list_date"])
-        df_main.drop(columns=["list_date_sz"], inplace=True, errors="ignore")
-    except Exception as e:
-        print(f"  [warn] 深圳数据失败: {e}")
-        df_main["plate"] = None
-        df_main["csrc_industry"] = None
-
-    # 北交所：补充证监会行业、上市日期
-    print("[akshare] 拉取北交所行业/上市日期...")
-    try:
-        df_bj = ak.stock_info_bj_name_code()
-        df_bj = df_bj[["证券代码", "所属行业", "上市日期"]].copy()
-        df_bj.rename(columns={
-            "证券代码": "sec_code",
-            "所属行业": "csrc_industry_bj",
-            "上市日期": "list_date_bj",
-        }, inplace=True)
-        df_bj["sec_code"] = df_bj["sec_code"].astype(str).str.strip().str.zfill(6)
-        df_bj["list_date_bj"] = pd.to_datetime(df_bj["list_date_bj"], errors="coerce").dt.date
-        df_main = df_main.merge(df_bj, on="sec_code", how="left")
-        df_main["csrc_industry"] = df_main["csrc_industry"].combine_first(df_main["csrc_industry_bj"])
-        df_main["list_date"] = df_main["list_date"].combine_first(df_main["list_date_bj"])
-        df_main.drop(columns=["csrc_industry_bj", "list_date_bj"], inplace=True, errors="ignore")
-    except Exception as e:
-        print(f"  [warn] 北交所数据失败: {e}")
-
-    # 行业主口径：东财一级行业（全市场统一）；缺失回落证监会行业
-    if skip_em:
-        em_map: dict[str, str] = {}
-        print("[skip] 按参数跳过东财行业")
-    else:
-        em_map = fetch_em_industry_map()
-    df_main["sw_industry"] = df_main["sec_code"].map(em_map)
-    df_main["sw_industry"] = df_main["sw_industry"].combine_first(df_main["csrc_industry"])
-    df_main.drop(columns=["csrc_industry"], inplace=True, errors="ignore")
-
-    # 板块兜底
-    mask_no_plate = df_main["plate"].isna()
-    df_main.loc[mask_no_plate, "plate"] = df_main.loc[mask_no_plate, "sec_code"].apply(infer_plate_from_code)
-
-    # 清理 'nan' 字符串
-    for col in ("plate", "sw_industry"):
-        df_main[col] = df_main[col].astype(str).str.strip()
-        df_main.loc[df_main[col].isin(("nan", "None", "")), col] = None
-
-    return df_main
+# --------------------------------------------------------------------------- #
+# Supabase
+# --------------------------------------------------------------------------- #
+def sb_env():
+    url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+           or os.environ.get("SUPABASE_KEY") or "")
+    if not url or not key:
+        raise SystemExit("缺少环境变量 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
+    return url, key
 
 
-# ----------------------------- 行构造与写入 -----------------------------
-def build_rows(df: pd.DataFrame) -> list[dict]:
-    """转成 dict 列表。list_date 转 ISO 字符串（date 对象无法 JSON 序列化）。
-    只包含本脚本有数据来源的列，ent_type/org_id/market_cap 永不触碰。"""
-    rows = []
-    for _, r in df.iterrows():
-        ld = r.get("list_date")
-        rows.append({
-            "sec_code": r["sec_code"],
-            "sec_name": r["sec_name"],
-            "sw_industry": r["sw_industry"] if pd.notna(r["sw_industry"]) else None,
-            "plate": r["plate"] if pd.notna(r["plate"]) else None,
-            "list_date": ld.isoformat() if (ld is not None and pd.notna(ld)) else None,
-        })
-    return rows
+def sb_headers(key: str) -> dict:
+    return {"apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json"}
 
 
-def upsert_companies(client, rows: list[dict], batch_size: int = 500) -> int:
-    """按「非空字段集合」分组提交 do-update：
-    None 的字段直接不进 payload，于是 upsert 的 SET 列表里就没有它——
-    从机制上杜绝用空值覆盖库里已有的行业/板块/日期。
-    （PostgREST 要求同一请求内各行列一致，所以必须按字段集合分组分别提交。）"""
-    groups: dict[frozenset, list[dict]] = {}
-    for r in rows:
-        payload = {k: v for k, v in r.items() if v is not None}
-        groups.setdefault(frozenset(payload.keys()), []).append(payload)
-
-    total = 0
-    for keys, group in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        label = "+".join(sorted(k for k in keys if k not in ("sec_code", "sec_name")))
-        for i in range(0, len(group), batch_size):
-            batch = group[i:i + batch_size]
-            client.table("companies").upsert(batch, on_conflict="sec_code").execute()
-            total += len(batch)
-        print(f"  [{label or '仅代码+名称'}] 共 {len(group)} 行 已写入")
-    return total
+def sb_table_columns(url: str, key: str, table: str = "companies"):
+    """取 1 行推断表列。表为空时返回 None, 调用方退回默认三列。"""
+    r = requests.get(f"{url}/rest/v1/{table}", headers=sb_headers(key),
+                     params={"select": "*", "limit": 1}, timeout=30)
+    r.raise_for_status()
+    rows = r.json()
+    return set(rows[0].keys()) if rows else None
 
 
-def emit_sql(rows: list[dict], path: Path):
-    """导出幂等 SQL（补空不覆盖），供 SQL Editor 手工执行。"""
-    def lit(v):
-        return "NULL" if v is None else "'" + str(v).replace("'", "''") + "'"
-    parts = [
-        "-- companies 数据导入（build_companies.py --emit-sql 生成）",
-        f"-- 生成时间: {dt.date.today().isoformat()} · 幂等，可重复执行",
-        "",
-    ]
-    conflict = (
-        "ON CONFLICT (sec_code) DO UPDATE SET\n"
-        "    sec_name    = excluded.sec_name,\n"
-        "    sw_industry = coalesce(excluded.sw_industry, companies.sw_industry),\n"
-        "    plate       = coalesce(excluded.plate, companies.plate),\n"
-        "    list_date   = coalesce(excluded.list_date, companies.list_date),\n"
-        "    updated_at  = now();"
-    )
-    CHUNK = 500
-    for i in range(0, len(rows), CHUNK):
-        chunk = rows[i:i + CHUNK]
-        parts.append("INSERT INTO public.companies (sec_code, sec_name, sw_industry, plate, list_date) VALUES")
-        parts.append(",\n".join(
-            f"    ({lit(r['sec_code'])}, {lit(r['sec_name'])}, {lit(r['sw_industry'])}, "
-            f"{lit(r['plate'])}, {lit(r['list_date'])})" for r in chunk))
-        parts.append(conflict)
-        parts.append("")
-    path.write_text("\n".join(parts), encoding="utf-8")
-    print(f"SQL 已导出: {path}")
+def sb_fetch_existing(url: str, key: str) -> dict:
+    """深分页拉全量 sec_code -> industry (规避 PostgREST 单次 1000 行上限)。"""
+    out: dict = {}
+    offset, page = 0, 1000
+    while True:
+        r = requests.get(f"{url}/rest/v1/companies", headers=sb_headers(key),
+                         params={"select": "sec_code,industry",
+                                 "order": "sec_code.asc",
+                                 "limit": page, "offset": offset},
+                         timeout=60)
+        r.raise_for_status()
+        rows = r.json()
+        for row in rows:
+            out[str(row["sec_code"])] = row.get("industry")
+        if len(rows) < page:
+            break
+        offset += page
+    return out
 
 
-def main():
-    ap = argparse.ArgumentParser(description="灌入 A 股公司基础信息到 Supabase")
-    ap.add_argument("--dry-run", action="store_true", help="只打印统计与前 5 条，不写库")
-    ap.add_argument("--emit-sql", metavar="PATH", help="另存为幂等 SQL 文件")
-    ap.add_argument("--skip-em", action="store_true", help="跳过东财行业板块（网络受限时）")
+def sb_upsert(url: str, key: str, records: list, batch: int = 500) -> None:
+    hdrs = dict(sb_headers(key))
+    hdrs["Prefer"] = "resolution=merge-duplicates,return=minimal"
+    total = len(records)
+    for i in range(0, total, batch):
+        chunk = records[i:i + batch]
+
+        def _post():
+            r = requests.post(f"{url}/rest/v1/companies?on_conflict=sec_code",
+                              headers=hdrs, json=chunk, timeout=120)
+            if r.status_code >= 300:
+                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+
+        with_retry(_post, _what=f"upsert 第 {i}-{i + len(chunk)} 行",
+                   _tries=3, _base=5.0)
+        print(f"[upsert] {min(i + batch, total)}/{total}")
+
+
+# --------------------------------------------------------------------------- #
+# 主流程
+# --------------------------------------------------------------------------- #
+def main() -> None:
+    ap = argparse.ArgumentParser(description="构建 / 刷新 companies 维表 (v3)")
+    ap.add_argument("--skip-em", action="store_true",
+                    help="跳过东财行业, 仅同步代码 / 名称")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="不写库, 输出 companies_preview.csv")
     args = ap.parse_args()
 
-    df = fetch_a_stock_info(skip_em=args.skip_em)
-    rows = build_rows(df)
-    n_ind = sum(1 for r in rows if r["sw_industry"])
-    print(f"\n共 {len(rows)} 条 · 行业覆盖 {n_ind} 条（{n_ind * 100 // max(len(rows), 1)}%）")
+    base = fetch_base_list()
 
-    if args.emit_sql:
-        emit_sql(rows, Path(args.emit_sql))
+    em_map: dict = {}
+    if not args.skip_em:
+        em_map = fetch_em_industry_map()
 
     if args.dry_run:
-        for r in rows[:5]:
-            print(r)
-        print("(dry-run 未写库)")
+        url = key = None
+        cols = None
+        existing: dict = {}
+    else:
+        url, key = sb_env()
+        cols = sb_table_columns(url, key)
+        existing = sb_fetch_existing(url, key)
+        print(f"[db] companies 现有 {len(existing)} 行; "
+              f"表列: {sorted(cols) if cols else '空表, 使用默认三列'}")
+
+    records: list = []
+    n_new = n_upgraded = n_kept = n_null = 0
+    for _, row in base.iterrows():
+        code, name = row["sec_code"], row["name"]
+        old_ind = existing.get(code)
+        em_ind = em_map.get(code)
+        if em_ind:
+            industry = em_ind
+            if old_ind != em_ind:
+                n_upgraded += 1
+        else:
+            industry = old_ind  # 东财没有 -> 保留库中原值, 绝不用空覆盖
+            if old_ind:
+                n_kept += 1
+            else:
+                n_null += 1
+        if code not in existing:
+            n_new += 1
+        exch, board = classify_board(code)
+        rec = {"sec_code": code, "name": name, "industry": industry,
+               "exchange": exch, "board": board}
+        if cols is not None:
+            rec = {k: v for k, v in rec.items() if k in cols}
+        elif not args.dry_run:
+            rec = {"sec_code": code, "name": name, "industry": industry}
+        records.append(rec)
+
+    print(f"[stats] 列表 {len(records)} 家 | 新增 {n_new} | "
+          f"行业升级为东财口径 {n_upgraded} | 保留原口径 {n_kept} | 仍无行业 {n_null}")
+
+    if args.dry_run:
+        out = "companies_preview.csv"
+        pd.DataFrame(records).to_csv(out, index=False, encoding="utf-8-sig")
+        print(f"[dry-run] 已写 {out}, 未触库")
         return
 
-    client = get_client()
-    total = upsert_companies(client, rows)
-    print(f"\n完成：共写入 {total} 条")
+    sb_upsert(url, key, records)
+    print("[done] companies 维表已更新")
 
 
 if __name__ == "__main__":
