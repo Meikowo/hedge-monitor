@@ -103,3 +103,10 @@ companies(维表)   announcements(公告层)
 - 质量评测会话（R3）：2–3 份典型公告 PDF（商品/外汇/进展各一）+ 你手工认定的
   正确抽取值（金标准雏形）
 - 前端会话（M3）：2–3 个你喜欢的参考站或风格描述 + 桌面/手机使用比例
+
+
+## 9. R1 checkpoint (2026-07-17)
+
+- 2026 announcements backfill verified in the new Supabase project: 3,526 rows, covering 2026-01-01 through 2026-07-15.
+- All 3,526 rows are currently `pending`; `extractions` is still empty by design.
+- Next action: run `Extract Batch (LLM)` with `limit=300` for the first batch, inspect the result, then continue in batches.
