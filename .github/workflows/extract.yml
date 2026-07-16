@@ -1,47 +1,55 @@
-name: Extract Hedging Fields (LLM)
+name: Extract Batch (LLM)
 
-# 每日自动抽取 + 手动批量抽取（回填历史数据后清零积压用）
-# 手动触发时可反复点，直到积压清零。
+# 手动清积压：反复触发直到 pending 清零。抽完自动重建事件层。
 on:
   workflow_dispatch:
     inputs:
       limit:
         description: '本次最多抽取条数'
         required: false
-        default: '200'
+        default: '300'
       since:
-        description: '只抽该日期后发布的公告 YYYY-MM-DD（留空则抽全部未抽取）'
+        description: '只抽该日期后发布的 YYYY-MM-DD（留空抽全部）'
         required: false
-  schedule:
-    - cron: '0 0 * * *'   # 北京时间 08:00，抽前一晚采集到的新公告
+      retry_failed:
+        description: '同时重试 failed（true/false）'
+        required: false
+        default: 'false'
 
 concurrency:
-  group: cninfo-extract
+  group: extract
   cancel-in-progress: false
 
 jobs:
   extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 小时上限，大批量抽取时够用
+    timeout-minutes: 360
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Run extraction
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Extract
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_BASE_URL: https://api.minimaxi.com/v1
-          LLM_MODEL: MiniMax-M3
         run: |
-          CMD="python scripts/extract_pipeline.py --limit ${{ github.event.inputs.limit || '200' }}"
-          if [ -n "${{ github.event.inputs.since }}" ]; then
-            CMD="$CMD --since ${{ github.event.inputs.since }}"
-          fi
+          CMD="python scripts/extract_announcements.py --limit ${{ github.event.inputs.limit || '300' }}"
+          if [ -n "${{ github.event.inputs.since }}" ]; then CMD="$CMD --since ${{ github.event.inputs.since }}"; fi
+          if [ "${{ github.event.inputs.retry_failed }}" = "true" ]; then CMD="$CMD --retry-failed"; fi
           $CMD
+      - name: Build events
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/build_events.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: extract-${{ github.run_id }}
+          path: output/*.csv
+          if-no-files-found: ignore
+          retention-days: 14

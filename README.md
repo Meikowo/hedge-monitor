@@ -1,193 +1,98 @@
-# A股套保公告监控 · 端到端实操手册
+# hedge-monitor —— A股上市公司套期保值监控
 
-> 你的角色：非程序员。  
-> 我的角色：把这件事一次跑通。  
-> 你只需要做 4 件事：(1) 建 Supabase 项目 → (2) 跑一段 SQL → (3) 把两个 key 发给我 → (4) 我把数据写进你的 Supabase + 验证网页。
+自用专业研究工具：套保公告日更监控、结构化抽取（额度/口径/品种/场所/审批）、
+事件层去重、计划 vs 实际对比分析。需求基准见 `docs/PRD.md`（v1.2），
+项目上下文见 `docs/PROJECT.md`，协作方式见 `docs/COLLAB_SOP.md`。
 
----
-
-## 0. 30 秒理解整个项目长什么样
+## 架构一图流
 
 ```
-你/自动机器人 ──→ Python 爬虫(每天跑)
-                     ↓
-                  巨潮资讯网(去抓公告)
-                     ↓
-                  Supabase 在线数据库 ←──── 你在网页里看到真实数据
-                     ↑                        ↑
-                  schema.sql(我已写好)        static/index.html(我已加好 Supabase 按钮)
+巨潮资讯 ──┐
+           ├─ GitHub Actions（定时/手动）── Python 脚本 ──► Supabase Postgres
+MiniMax-M3 ┘                                                  │  (RLS: anon 只读)
+                                                              ▼
+iFind 导出(xlsx, 季度手动) ─ import workflow ─► companies     GitHub Pages 前端(M3)
 ```
 
-- **Python 爬虫** = 跑在 GitHub Actions 上(免费服务器)，每天 20:30 自动抓
-- **Supabase** = 在线数据库，免费层够用
-- **HTML** = 你电脑上双击打开的网页，右下角"🔌 Supabase"按钮点一下就联通
-- **不要在 HTML 里放 service_role key**，那个只能放 Python 的 .env 里
+数据三层：`announcements`（公告层）→ `extractions` + `quota_items`（抽取层）
+→ `hedge_events` + `event_members`（事件层，去重后的"一次套保决策"）。
 
----
-
-## 1. 你现在马上要做的事
-
-### 第 1 步：注册并创建 Supabase 项目（5 分钟）
-
-打开：https://supabase.com/
-
-- 注册或登录
-- 点 **"New Project"**
-- 名字随便起，比如 `hedge-monitor`
-- **Database Password** 自己设一个（记住！不会再次显示）
-- **Region** 选 `Singapore` 或 `Tokyo`（离你近）
-- 等 1-2 分钟初始化完成
-
-### 第 2 步：执行建表 SQL（2 分钟）
-
-进入项目后：
-- 左侧菜单 → **SQL Editor**
-- 点 **"New query"**
-- 把我给你的 `supabase/schema.sql` 文件**全部内容复制进去**
-- 点右下角 **"Run"**
-- 看到 "Success. No rows returned" 或类似绿色成功提示就行
-
-这一步会建 5 张表 + 1 个视图 + 启用 RLS 安全策略（前端只能读，不能写）。
-
-### 第 3 步：拿到 3 个 key（1 分钟）
-
-- 左侧菜单 → **Project Settings**（齿轮图标）→ **API Keys**
-  - 新版界面可能叫 **API Keys** 或 **Connect**
-  - 老界面可能在 **API** 下
-
-你要复制这 3 个：
-
-| 名称 | 用途 | 能不能发给我 |
-|---|---|---|
-| **Project URL** | 形如 `https://xxxxx.supabase.co` | ✅ 可以 |
-| **anon public key**（也叫 publishable key） | HTML 前端只读用 | ✅ 可以 |
-| **service_role / secret key** | Python 写数据用 | ❌ **绝对不要**发给我 |
-
-> 新版 Supabase 把 key 改名为 `publishable`（前端用）和 `secret`（后端用）；老项目里你可能看到 `anon` 和 `service_role`。不管名字怎么变，**短的那个是前端只读，长得"权限大"的那个是后端写入**。
-
-### 第 4 步：把 Project URL 和 anon key 发给我
-
-只发这两个，service_role 自己留着。发完我会：
-1. 在沙箱里跑一次爬虫，把真实公告写进你的 Supabase
-2. 让你在 Table Editor 里能看到数据
-3. 帮你验证 HTML 能拉到这些数据
-4. 给你写好 GitHub Actions 配置文件（之后每天自动跑）
-
----
-
-## 2. 你电脑本地需要准备什么
-
-只为了打开 HTML 验证（不需要装 Python）：
-
-- 任何现代浏览器（Chrome / Edge / Safari）
-- **不要**直接双击 HTML 在 `file://` 打开（Supabase 跨域会失败）
-- 正确做法：在 HTML 所在目录用命令行跑：
-  ```bash
-  cd /path/to/hedge-monitor/static
-  python3 -m http.server 8000
-  ```
-  然后浏览器访问 `http://127.0.0.1:8000`
-
-如果你要本地跑爬虫（可选，第一版可以让 GitHub Actions 帮你跑）：
-
-- Python 3.10+
-- 安装依赖：`pip install -r requirements.txt`
-
----
-
-## 3. 项目文件结构
+## 目录
 
 ```
-hedge-monitor/
-├── cninfo_hedging_crawler.py     ← 巨潮爬虫(原始版本，一行没改)
-├── scripts/
-│   └── ingest_to_supabase.py     ← 把爬虫结果写入 Supabase
-├── supabase/
-│   └── schema.sql                ← 在 Supabase SQL Editor 跑这段
-├── static/
-│   └── index.html                ← 你打开的网页(原版 + 已加 Supabase 桥接)
-├── docs/
-│   ├── hedge_monitor_startup.md  ← 详细启动文档(Claude 写的)
-│   └── README_lite_template.md   ← Supabase Lite 原始 README
-├── .github/workflows/
-│   └── daily-cninfo.yml          ← GitHub Actions 定时任务(我帮你配)
-├── .env.example                  ← 环境变量模板(你复制成 .env)
-├── requirements.txt              ← Python 依赖
-└── README.md                     ← 本文件
+config/keywords.yml     召回词表（查全率的单一事实源，加词即生效）
+data/                   iFind 公司表（季度替换后跑 import workflow）
+db/                     000_reset → 001_init → verify（SQL Editor 手动执行）
+scripts/                common/cninfo 基础层 + 5 个业务脚本
+.github/workflows/      daily / backfill / extract / audit / import-companies / probe
+docs/                   PRD、PROJECT、COLLAB_SOP、schema_snapshot、worklogs
+output/                 运行快照（gitignore，Actions 里以 artifact 保留）
 ```
 
----
+## 首次部署（按顺序做，约 30 分钟人工 + 数小时挂机）
 
-## 4. 跑通后的"日常"流程
+1. **仓库**：旧代码存档到分支再覆盖 main
+   ```bash
+   cd hedge-monitor
+   git checkout -b legacy-demo && git push origin legacy-demo   # 存档旧 demo
+   git checkout main
+   # 删除 main 下全部旧文件（保留 .git），把本包全部内容复制进来
+   git add -A && git commit -m "R0: 重建底座（三层数据模型+全自动管线）" && git push
+   ```
+   注意：旧 Pages demo 会失效，旧代码完整保留在 `legacy-demo` 分支。
 
-跑通一次后，什么都不用做：
+2. **数据库**：Supabase → SQL Editor，先执行 `db/000_reset.sql`（⚠️ 销毁旧表，
+   数据均可由管线重建），再执行 `db/001_init.sql`。跑 `db/verify.sql` 的
+   V1/V2 段确认 6 张表 RLS 全开、6 条 anon 只读策略就位。
 
+3. **秘钥**（名字固定，值只出现在这两处）：
+   - GitHub repo → Settings → Secrets and variables → Actions，新建 3 个：
+     `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`LLM_API_KEY`（= MiniMax key）
+   - 本地：`cp .env.example .env` 后填同样 3 个值（本地跑脚本才需要）
+
+4. **探活**：Actions → *Probe MiniMax Reachability* → Run。
+   绿色 = 抽取跑 Actions；红色 = 把日志贴回会话，抽取降级本地跑（脚本完全同一套）。
+
+5. **公司维表**：Actions → *Import Companies (iFind)*，先 `dry_run=true` 看统计，
+   正常后 `dry_run=false` 正式导入。验收：`verify.sql` V3 段，total=5524。
+
+6. **回填 2026**：Actions → *Backfill Announcements*，year=2026。
+   跑完看 V4/V5 段：应有数千条、覆盖 2026-01-01 至今。
+
+7. **清抽取积压**：Actions → *Extract Batch (LLM)*，limit=300，反复触发直到
+   V4 段 pending≈0（每轮约 1–2.5 小时，取决于 MiniMax 响应速度）。
+
+8. 之后 **daily 每天北京 03:00 自动接管**（抓3天窗+抽60条+重建事件层），
+   **audit 每月1日自动补捞漏检**。历史年份（2025→2021）逐年重复第 6–7 步。
+
+## 日常运维
+
+| 场景 | 操作 |
+|---|---|
+| 看每天跑没跑 | Actions → Daily Pipeline 的运行记录（快照在 artifact 里） |
+| 发现漏检某类表述 | `config/keywords.yml` 加词 → push，次日生效；历史用 backfill 补 |
+| 换季度公司表 | 新 xlsx 放 `data/`（命名 companies_ifind_YYYYMMDD.xlsx）→ push → 跑 import workflow 并填新路径 |
+| 改抽取提示词 | 改 `scripts/prompt_extract.py` 并**递增 PROMPT_VERSION** |
+| 重抽某几条 | 本地 `python scripts/extract_announcements.py --ids <ann_id> ...` |
+| Supabase 保活 | daily 每日写库即天然保活；若 Actions 断档超一周需手动进后台看一眼 |
+
+## 本地运行
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # 填值
+python scripts/fetch_announcements.py daily --days 3 --dry-run
+python scripts/extract_announcements.py --limit 5 --dry-run
+python scripts/build_events.py --dry-run
 ```
-每天 20:30 (北京时间)
-  ↓
-GitHub Actions 自动跑爬虫
-  ↓
-抓当天巨潮公告 → 写进 Supabase
-  ↓
-你打开 HTML → 看到今天的新公告
-```
 
----
+## 故障排查
 
-## 5. 常见问题快速对答
-
-**Q: anon key 发给别人安全吗？**  
-A: 安全。Supabase 官方明确说 anon key 就是给前端用的，RLS 策略会限制它只能读公开数据。
-
-**Q: service_role key 泄露了怎么办？**  
-A: 立刻去 Supabase 控制台 Reset 它，然后更新 .env 和 GitHub Secrets。这个 key 能写所有表。
-
-**Q: Supabase 免费层够用吗？**  
-A: 第一版完全够。免费层：500MB 数据库、1GB 存储、5GB 出口流量、2 个项目。只存公告元数据不存 PDF 的话，跑几年都没问题。
-
-**Q: 500MB 公告数据大概能存多少条？**  
-A: 一条公告元数据大约 1-3KB。500MB ≈ 20-50 万条公告。够你用 5-10 年。
-
-**Q: PDF 不存吗？**  
-A: 第一版不存。HTML 里的"打开 PDF"按钮会直接跳到巨潮的远程链接。等你以后真要做"解析 PDF 抽字段"再考虑。
-
-**Q: 数据多久更新一次？**  
-A: GitHub Actions 配的是每天北京时间 20:30 跑一次。如果想更频繁，改 `.github/workflows/daily-cninfo.yml` 里的 cron。
-
-**Q: 我想看某家公司历史所有套保公告怎么办？**  
-A: 在 HTML 顶部搜索框输入公司代码或简称，过滤出来所有相关公告。后续会加"公司详情页"。
-
-**Q: 出错了怎么办？**  
-A: 把错误截图发给我，**不要发 service_role key**。我会帮你看。
-
----
-
-## 6. 不做什么（先不给自己加压）
-
-第一版明确**不**做的事：
-- ❌ 用户登录、权限系统
-- ❌ 收费、多租户
-- ❌ 主动告警推送（邮件/企微/钉钉）
-- ❌ 港股美股
-- ❌ 复杂向量数据库
-- ❌ 全量 PDF 解析（先用标题识别）
-- ❌ 漂亮但没数据的大屏
-
-第二版再考虑：
-- 按需 PDF 解析 + 金额/期限精确抽取
-- 原文证据链（字段→页码→原句）
-- LLM 结构化抽取
-- 年报深度解析
-- 行业对比
-
----
-
-## 7. 接下来
-
-把 **Project URL** 和 **anon public key** 发给我，我帮你：
-1. 实跑一次，写入你的 Supabase
-2. 验证 HTML 能拉到真实数据
-3. 给你 GitHub Actions 配置文件
-4. 教你怎么 push 到 GitHub 启用定时
-
-不用发 service_role key，它永远只在你自己的 `.env` 里。
+- **fetch 报"非JSON响应，疑似被临时风控"**：巨潮临时限流，脚本会自动退避重试；
+  若整轮失败，等 1 小时重跑同一 workflow 即可（幂等，不会重复入库）。
+- **extract 大量 failed**：先跑 probe 确认可达性；确认后用 extract workflow
+  的 `retry_failed=true` 重试。失败原因在 `announcements.note` 列。
+- **事件分组看着不对**：`hedge_events` 是派生表，改 `scripts/build_events.py`
+  规则后重跑即可全量重算，不影响底层数据。
+- 其他异常：把 Actions 日志相关段落 + `verify.sql` 对应段结果，按
+  `docs/COLLAB_SOP.md` 的方式原样贴回下次会话。

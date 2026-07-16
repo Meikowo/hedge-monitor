@@ -1,46 +1,37 @@
-name: Backfill Announcements (Historical)
+name: Backfill Announcements
 
-# 手动触发：按年份回填历史公告。一年一跑，避免 Actions 超时。
+# 手动触发：按年份回填历史公告。一年一跑；与其他巨潮任务串行防风控。
 on:
   workflow_dispatch:
     inputs:
       year:
-        description: '回填年份 (如 2025)'
+        description: '回填年份（如 2026）'
         required: true
-        default: '2025'
-      keywords:
-        description: '标题关键词（空格分隔，留空用默认）'
-        required: false
+        default: '2026'
 
-# 同一时间只允许一个回填在跑：多个年份并行会双倍请求巨潮，极易触发风控封 IP。
-# 后触发的会排队等待，不会被取消。
 concurrency:
-  group: cninfo-backfill
+  group: cninfo
   cancel-in-progress: false
 
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 小时上限，一年通常够了
+    timeout-minutes: 360
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
       - name: Run backfill
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          if [ -n "${{ github.event.inputs.keywords }}" ]; then
-            python scripts/backfill_announcements.py --year "${{ github.event.inputs.year }}" --keywords ${{ github.event.inputs.keywords }}
-          else
-            python scripts/backfill_announcements.py --year "${{ github.event.inputs.year }}"
-          fi
+        run: python scripts/fetch_announcements.py backfill --year "${{ github.event.inputs.year }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backfill-${{ github.event.inputs.year }}-${{ github.run_id }}
+          path: output/*.csv
+          if-no-files-found: ignore
+          retention-days: 30

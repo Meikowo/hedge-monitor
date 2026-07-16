@@ -1,0 +1,21 @@
+name: Probe MiniMax Reachability
+
+# 架构定型前的可达性实测（7/8 教训：逐源实测，不类比推断）。
+# 绿=抽取可跑 Actions；红=抽取降级本地跑，把日志贴回会话。
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Probe
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: python scripts/probe_minimax.py
