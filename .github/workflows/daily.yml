@@ -1,0 +1,57 @@
+name: Daily Pipeline
+
+# 北京时间凌晨 03:00 单班次：抓全前一整天 → 抽取一批 → 重建事件层
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '抓取最近几天'
+        required: false
+        default: '3'
+  schedule:
+    - cron: '0 19 * * *'   # UTC 19:00 = 北京 03:00
+
+concurrency:
+  group: cninfo
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+
+      - name: Fetch announcements
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/fetch_announcements.py daily --days "${{ github.event.inputs.days || '3' }}"
+
+      - name: Extract (LLM)
+        # MiniMax 若从 Actions 不可达，本步失败不阻断事件层与次日采集（探活见 probe workflow）
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: python scripts/extract_announcements.py --limit 60 --retry-failed
+
+      - name: Build events
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/build_events.py
+
+      - name: Upload run snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-output-${{ github.run_id }}
+          path: output/*.csv
+          if-no-files-found: ignore
+          retention-days: 14

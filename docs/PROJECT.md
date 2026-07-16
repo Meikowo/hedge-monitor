@@ -1,0 +1,105 @@
+# PROJECT.md —— 套保监控（hedge-monitor）项目上下文主文件 v2.0
+
+> 用途：每次与 Claude 开新会话时上传本文件（或放入 Claude Project 知识库）。
+> 由你维护；每次会话结束让 Claude 输出更新段落，你替换后 commit。
+> 需求的唯一基准是 docs/PRD.md（v1.2），本文件记录"现状与决策"，不复述需求。
+> 最后更新：2026-07-13（R0 重建底座交付）
+
+## 1. 一句话定位
+
+自用专业研究工具：A 股上市公司套保披露的日更监控、结构化抽取与「计划 vs 实际」
+对比分析，服务期货研究所研究员的风险管理研究与展业线索需求。单用户，无对外服务。
+
+## 2. 架构与技术栈（R0 定稿）
+
+- **采集**：GitHub Actions（Python）→ 巨潮 hisAnnouncement（标题层）+
+  fulltextSearch（正文审计层）。✅ Actions 直连巨潮已长期验证可达。
+- **抽取**：MiniMax-M3，OpenAI 兼容接口 `https://api.minimaxi.com/v1`，
+  thinking=adaptive，temperature=1.0，强容错 JSON 解析（剥 think 块+括号配对）。
+  ⚠️ Actions→MiniMax 可达性待 probe workflow 实测（沿用 7/8 教训：逐源实测）。
+- **存储**：Supabase Postgres，PostgREST REST 直写（service_role），
+  迁移文件在 db/ 且为唯一事实源（"照仓库即可重建库"）。
+- **公司维表**：iFind 手动导出（季度刷新）为权威来源，含企业性质+同花顺三级行业，
+  一并解决了旧 #7 ent_type 补全。akshare/东财路线已废弃（Actions 不可达，两次实测证伪）。
+- **前端**：GitHub Pages 静态站（M3 重做），数据通路定为 **anon key 直连
+  Supabase + RLS 只读**（策略已随 001_init.sql 就位）；读取契约=视图
+  v_ann_flow / v_events。设计语言按 PRD 7.6「研报纸感的数据终端」。
+- **调度**：daily（北京03:00）/ audit（每月1日）自动；backfill / extract /
+  import-companies / probe 手动触发。
+
+## 3. 数据模型（三层，契约详见 docs/schema_snapshot.md）
+
+```
+companies(维表)   announcements(公告层)
+                        │ 1:1
+                  extractions(抽取层) ── quota_items(额度明细，分口径)
+                        │ 派生聚合（build_events 全量重建）
+                  hedge_events(事件层) ── event_members(挂靠关系)
+```
+
+三个老问题的落地方式：
+1. **查全率**：三层召回全自动——L1 标题词表（config/keywords.yml，13词）逐词查+去重；
+   L2 月度全文审计自动补捞漏检入库；L3 LLM is_hedge_related 兜底过滤噪音。加词=改配置。
+2. **事件去重**：hedge_events 一行=一次套保决策；进展/股东大会决议等挂靠而非新增；
+   全部统计口径应基于事件层或明确声明基于公告层。
+3. **额度口径**：quota_items 结构化五元组（scope/basis/amount/currency/raw），
+   basis 闭集枚举（保证金占用/业务总额/名义本金/合约价值/其他/未披露）+ CHECK 约束；
+   每条额度带原文摘录、页码与**程序回验**双标志（amount_verified/quote_verified，
+   PRD 5.7 第二层防线已在公告管线提前落地）。
+
+## 4. 关键决策记录（ADR，一事一行，详情见对应 worklog）
+
+- 2026-07-08：companies 构建移出 Actions（东财/akshare 机房 IP 被拉黑）；确立
+  「国内商业接口可达性必须逐源实测」原则。
+- 2026-07-13：**R0 从头重建**——放弃旧库存量（约4000+公告/124抽取），理由：新词表
+  召回本就要求重抓、新数据模型要求重抽、旧抽取无页码证据与口径明细。旧代码存档
+  legacy-demo 分支。
+- 2026-07-13：companies 权威来源定稿为 iFind 季度导出；build_companies v4 路线废弃。
+- 2026-07-13：抽取层与事件层分离；事件层为**派生表**（确定性键+全量重建），
+  分组规则可随时演进而不伤底层数据。
+- 2026-07-13：抽取范围含制度/可行性/进展（is_hedge_related=true + ann_role 区分），
+  仅"计划-董事会/股东大会"贡献事件额度；irrelevant 由 LLM 判定自动打标。
+- 2026-07-13：秘钥红线维持（值不进仓库/对话/前端），MiniMax key 统一变量名 LLM_API_KEY。
+
+## 5. 秘钥清单（只记名字与位置）
+
+- GitHub repo Secrets：SUPABASE_URL、SUPABASE_SERVICE_ROLE_KEY、LLM_API_KEY
+- 本地 .env（已 gitignore）：同上三个
+- 前端（M3 起）只允许 anon key + RLS 只读
+
+## 6. 进度清单（2026-07-13 版）
+
+| # | 事项 | 状态 |
+|---|------|------|
+| R0.1 | 三层数据模型 + 迁移 + 视图 + RLS（db/） | ✅ 已交付，待执行 |
+| R0.2 | 采集/审计/抽取/事件/导入五条管线 + 6 workflows | ✅ 已交付，待部署 |
+| R0.3 | 用户侧部署 8 步（README 首次部署节） | ⏳ 待你执行 |
+| R0.4 | MiniMax@Actions 探活结论 | ⏳ 待 probe 实测回贴 |
+| R1 | 回填 2026 + 清积压 + 首轮 verify.sql 全量回贴 | ⏸ 待 R0.3 |
+| R2 | 逐年回填 2025→2021，每年配抽取清零（挂机） | ⏸ |
+| R3 | 抽取质量金标准评测：50 份人工标注 vs 抽取结果，字段级准确率 | ⏸ 建议 R1 后 |
+| M3 | 前端正式版（PRD 7.x + 设计语言 7.6，先视觉方向稿再落码） | ⏸ 数据初具规模后 |
+| M4a/b | 定期报告（年报+半年报）采集与解析，periodic_derivatives 建表随其迁移 | ⏸ 最硬最后 |
+| M5 | 计划 vs 实际三维核对（PRD 5.6） | ⏸ 依赖 M4 |
+
+## 7. 风险与已知局限
+
+1. **MiniMax@Actions 未实测**（本周探活出结论；不可达则抽取本地跑，脚本同一套）。
+2. **事件分组 v1 是启发式**：同年同类追加额度会并入同一事件（多数场景合理）；
+   跨年多期计划以标签年锚定。待真实数据验证后在 build_events v2 细化——派生表
+   设计保证重算零成本。
+3. **重建成本**：历史 5 年重抽约 1.5–2.5 万次 LLM 调用（多数公告 irrelevant 判定
+   很便宜），MiniMax 年费套餐内预计可covered；逐年推进可随时观察用量。
+4. **巨潮风控**：所有巨潮 workflow 共用 concurrency group 串行化；退避已内置；
+   整轮失败等 1 小时幂等重跑。
+5. **Supabase 免费档**：daily 每日写库天然保活；留意 Actions 断档。
+6. **公开性**：anon 可读全库（自用接受 obscurity）；如需加口令在 M3 讨论。
+7. **iFind 表时效**：季度刷新，退市/更名/性质变更在刷新间隔内滞后（可接受）。
+
+## 8. 下次会话前的待补信息（视会话主题选带）
+
+- 常备三件套：本文件 + docs/schema_snapshot.md + 最新一份 worklog
+- R1 收口会话：verify.sql 全段输出 + 各 workflow 运行时长/异常截图
+- 质量评测会话（R3）：2–3 份典型公告 PDF（商品/外汇/进展各一）+ 你手工认定的
+  正确抽取值（金标准雏形）
+- 前端会话（M3）：2–3 个你喜欢的参考站或风格描述 + 桌面/手机使用比例

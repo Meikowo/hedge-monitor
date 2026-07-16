@@ -1,17 +1,15 @@
-# 密钥——service role key 泄露等于数据库全权限泄露，绝不能进仓库
+# 秘钥红线：任何 key 的值不进仓库
 .env
 
-# 爬虫本地产物（PDF 体量大，且已入 Supabase）
-data/
+# 运行产物
+output/*
+!output/.gitkeep
+data/pdfs/
 
 # Python
 __pycache__/
 *.pyc
 .venv/
-venv/
 
-# 系统与编辑器
+# 系统
 .DS_Store
-Thumbs.db
-.idea/
-.vscode/

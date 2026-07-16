@@ -24,4 +24,3 @@ drop table if exists public.announcements;
 drop table if exists public.companies;
 
 -- 触发器随表删除；函数在 001_init.sql 中以 create or replace 重建
-

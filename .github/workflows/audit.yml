@@ -1,0 +1,50 @@
+name: Recall Audit (Monthly)
+
+# 每月1日北京04:30：全文检索补捞标题层漏检，自动入库进抽取管线（查全率闭环）
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '审计最近几天'
+        required: false
+        default: '35'
+      start:
+        description: '或指定起始日 YYYY-MM-DD（配合 end，用于历史审计）'
+        required: false
+      end:
+        description: '结束日 YYYY-MM-DD'
+        required: false
+  schedule:
+    - cron: '30 20 1 * *'   # UTC 20:30 = 北京次日 04:30，每月1日
+
+concurrency:
+  group: cninfo
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Run recall audit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -n "${{ github.event.inputs.start }}" ] && [ -n "${{ github.event.inputs.end }}" ]; then
+            python scripts/audit_recall.py --start "${{ github.event.inputs.start }}" --end "${{ github.event.inputs.end }}"
+          else
+            python scripts/audit_recall.py --days "${{ github.event.inputs.days || '35' }}"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recall-audit-${{ github.run_id }}
+          path: output/*.csv
+          if-no-files-found: ignore
+          retention-days: 90

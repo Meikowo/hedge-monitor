@@ -1,0 +1,40 @@
+name: Import Companies (iFind)
+
+# 手动触发：把 data/ 下的 iFind 导出灌入 companies 表（季度刷新时替换文件后重跑）
+on:
+  workflow_dispatch:
+    inputs:
+      xlsx:
+        description: 'xlsx 路径（仓库内）'
+        required: false
+        default: 'data/companies_ifind_20260711.xlsx'
+      dry_run:
+        description: '试运行（只打印统计，不写库）'
+        required: false
+        default: 'false'
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Import
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          CMD="python scripts/import_companies.py --xlsx '${{ github.event.inputs.xlsx }}'"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then CMD="$CMD --dry-run"; fi
+          eval $CMD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companies-import-${{ github.run_id }}
+          path: output/*.csv
+          if-no-files-found: ignore
+          retention-days: 30
