@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f5f3ee" />
-    <meta name="description" content="A 鑲′笂甯傚叕鍙稿鏈熶繚鍊煎叕鍛婁笌浜嬩欢鐩戞帶" />
-    <title>Hedge Monitor 路 濂椾繚鐩戞帶</title>
+    <meta name="description" content="A 股上市公司套期保值公告与事件监控" />
+    <title>Hedge Monitor · 套保监控</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="config.js"></script>
     <script src="app.js" defer></script>
@@ -13,79 +13,79 @@
   <body>
     <div class="shell">
       <header class="topbar">
-        <a class="brand" href="#top" aria-label="Hedge Monitor 棣栭〉">
+        <a class="brand" href="#top" aria-label="Hedge Monitor 首页">
           <span class="brand-mark">H</span>
           <span>
             <strong>HEDGE MONITOR</strong>
-            <small>濂楁湡淇濆€?路 鐮旀姤寮忔暟鎹粓绔?/small>
+            <small>套期保值 · 研报式数据终端</small>
           </span>
         </a>
-        <nav class="topnav" aria-label="涓诲鑸?>
-          <button class="nav-link is-active" data-view="events">浜嬩欢闈㈡澘</button>
-          <button class="nav-link" data-view="announcements">鍏憡鍘熸祦</button>
+        <nav class="topnav" aria-label="主导航">
+          <button class="nav-link is-active" data-view="events">事件面板</button>
+          <button class="nav-link" data-view="announcements">公告原流</button>
         </nav>
         <button class="refresh-button" id="refresh-button" type="button">
-          <span class="refresh-dot"></span>鍒锋柊鏁版嵁
+          <span class="refresh-dot"></span>刷新数据
         </button>
       </header>
 
       <main id="top">
         <section class="masthead">
           <div>
-            <p class="eyebrow">DAILY HEDGE INTELLIGENCE <span>路</span> R0 PREVIEW</p>
-            <h1>鎶婂叕鍛婏紝璇绘垚<br /><em>鍙拷韪殑椋庨櫓浜嬩欢銆?/em></h1>
-            <p class="lede">浠庝笂甯傚叕鍙告姭闇蹭腑鎻愬彇鍝佺銆侀搴︺€佹湡闄愪笌瀹℃壒鍙ｅ緞锛屾部鐫€璇佹嵁鍥炲埌鍘熸枃銆?/p>
+            <p class="eyebrow">DAILY HEDGE INTELLIGENCE <span>·</span> R0 PREVIEW</p>
+            <h1>把公告，读成<br /><em>可追踪的风险事件。</em></h1>
+            <p class="lede">从上市公司披露中提取品种、额度、期限与审批口径，沿着证据回到原文。</p>
           </div>
           <div class="masthead-note">
             <span class="live-indicator"><i></i>LIVE DATA</span>
-            <strong id="coverage-label">姝ｅ湪杩炴帴鏁版嵁灞傗€?/strong>
-            <span id="updated-label">璇诲彇 Supabase 鍙瑙嗗浘</span>
+            <strong id="coverage-label">正在连接数据层…</strong>
+            <span id="updated-label">读取 Supabase 只读视图</span>
           </div>
         </section>
 
-        <section class="metric-grid" aria-label="鏁版嵁姒傝">
+        <section class="metric-grid" aria-label="数据概览">
           <article class="metric-card metric-card--accent">
-            <span class="metric-label">宸茬粨鏋勫寲鍏憡</span>
-            <strong id="metric-extracted">鈥?/strong>
-            <small>鍚鏂囦笌 PDF 椤电爜璇佹嵁</small>
+            <span class="metric-label">已结构化公告</span>
+            <strong id="metric-extracted">—</strong>
+            <small>含正文与 PDF 页码证据</small>
           </article>
           <article class="metric-card">
-            <span class="metric-label">濂椾繚浜嬩欢</span>
-            <strong id="metric-events">鈥?/strong>
-            <small>鎸変竴娆″喅绛栧悎骞跺睍绀?/small>
+            <span class="metric-label">套保事件</span>
+            <strong id="metric-events">—</strong>
+            <small>按一次决策合并展示</small>
           </article>
           <article class="metric-card">
-            <span class="metric-label">寰呭鐞嗛槦鍒?/span>
-            <strong id="metric-pending">鈥?/strong>
-            <small>鍘嗗彶鍥炲～鎸佺画杩涜涓?/small>
+            <span class="metric-label">待处理队列</span>
+            <strong id="metric-pending">—</strong>
+            <small>历史回填持续进行中</small>
           </article>
           <article class="metric-card">
-            <span class="metric-label">澶辫触寰呭鏍?/span>
-            <strong id="metric-failed">鈥?/strong>
-            <small>涓嶈繘鍏ョ粺璁″彛寰?/small>
+            <span class="metric-label">失败待复核</span>
+            <strong id="metric-failed">—</strong>
+            <small>不进入统计口径</small>
           </article>
         </section>
 
         <section class="workspace">
           <aside class="sidebar">
             <div class="sidebar-block">
-              <div class="section-kicker">鐮旂┒鍙ｅ緞</div>
-              <p class="sidebar-copy">鍏堢湅浜嬩欢锛屽啀鍥炲埌鍏憡銆傞搴﹀缁堝垎鍙ｅ緞锛屼笉鎶娾€滄湭鎶湶鈥濆綋鎴?0銆?/p>
+              <div class="section-kicker">研究口径</div>
+              <p class="sidebar-copy">先看事件，再回到公告。额度始终分口径，不把“未披露”当成 0。</p>
               <div class="legend-list">
-                <span><i class="legend-dot legend-dot--commodity"></i>鍟嗗搧</span>
-                <span><i class="legend-dot legend-dot--fx"></i>澶栨眹</span>
-                <span><i class="legend-dot legend-dot--rate"></i>鍒╃巼</span>
+                <span><i class="legend-dot legend-dot--commodity"></i>商品</span>
+                <span><i class="legend-dot legend-dot--fx"></i>外汇</span>
+                <span><i class="legend-dot legend-dot--rate"></i>利率</span>
               </div>
             </div>
             <div class="sidebar-block status-block">
-              <div class="section-kicker">鏁版嵁鍋ュ悍</div>
-              <div class="status-line"><span>鏉ユ簮</span><strong>宸ㄦ疆 + iFind</strong></div>
-              <div class="status-line"><span>鎶藉彇妯″瀷</span><strong>MiniMax-M3</strong></div>
-              <div class="status-line"><span>璇佹嵁绾緥</span><strong class="status-ok">宸插惎鐢?/strong></div>
+              <div class="section-kicker">数据健康</div>
+              <div class="status-line"><span>来源</span><strong>巨潮 + iFind</strong></div>
+              <div class="status-line"><span>抽取模型</span><strong>MiniMax-M3</strong></div>
+              <div class="status-line"><span>证据纪律</span><strong class="status-ok">已启用</strong></div>
             </div>
             <div class="sidebar-block sidebar-footnote">
-              <span>R0 路 棰勮鐗?/span>
-              <p>褰撳墠灞曠ず鐪熷疄 Supabase 鏁版嵁銆傚巻鍙叉娊鍙栧畬鎴愬悗锛岄〉闈㈡棤闇€鏀圭増鍗冲彲缁х画澧為噺濉厖銆?/p>
+              <span>R0 · 预览版</span>
+              <p>当前展示真实 Supabase 数据。历史抽取完成后，页面无需改版即可继续增量填充。</p>
             </div>
           </aside>
 
@@ -93,46 +93,46 @@
             <div class="content-head">
               <div>
                 <p class="eyebrow">RESEARCH BOARD</p>
-                <h2 id="view-title">杩戞湡濂椾繚浜嬩欢</h2>
+                <h2 id="view-title">近期套保事件</h2>
               </div>
-              <span class="result-count" id="result-count">鈥?/span>
+              <span class="result-count" id="result-count">—</span>
             </div>
 
             <div class="filter-bar" id="filter-bar">
               <label class="search-field">
-                <span aria-hidden="true">鈱?/span>
-                <input id="search-input" type="search" placeholder="鎼滅储鍏徃銆佷唬鐮佹垨鍏憡鏍囬" autocomplete="off" />
+                <span aria-hidden="true">⌕</span>
+                <input id="search-input" type="search" placeholder="搜索公司、代码或公告标题" autocomplete="off" />
               </label>
               <label class="select-field">
-                <span>绫诲埆</span>
+                <span>类别</span>
                 <select id="scope-filter">
-                  <option value="all">鍏ㄩ儴</option>
-                  <option value="鍟嗗搧">鍟嗗搧</option>
-                  <option value="澶栨眹">澶栨眹</option>
-                  <option value="鍒╃巼">鍒╃巼</option>
+                  <option value="all">全部</option>
+                  <option value="商品">商品</option>
+                  <option value="外汇">外汇</option>
+                  <option value="利率">利率</option>
                 </select>
               </label>
               <label class="select-field select-field--role">
-                <span>鍏憡瑙掕壊</span>
+                <span>公告角色</span>
                 <select id="role-filter">
-                  <option value="all">鍏ㄩ儴</option>
-                  <option value="璁″垝-钁ｄ簨浼?>璁″垝 / 钁ｄ簨浼?/option>
-                  <option value="璁″垝-鑲′笢澶т細">璁″垝 / 鑲′笢澶т細</option>
-                  <option value="鍙鎬у垎鏋?>鍙鎬у垎鏋?/option>
-                  <option value="绠＄悊鍒跺害">绠＄悊鍒跺害</option>
-                  <option value="杩涘睍">杩涘睍</option>
+                  <option value="all">全部</option>
+                  <option value="计划-董事会">计划 / 董事会</option>
+                  <option value="计划-股东大会">计划 / 股东大会</option>
+                  <option value="可行性分析">可行性分析</option>
+                  <option value="管理制度">管理制度</option>
+                  <option value="进展">进展</option>
                 </select>
               </label>
             </div>
 
             <div id="loading-state" class="state-panel">
               <span class="loader"></span>
-              <strong>姝ｅ湪璇诲彇缁撴瀯鍖栨暟鎹?/strong>
-              <span>杩炴帴鍙瑙嗗浘 v_ann_flow / v_events</span>
+              <strong>正在读取结构化数据</strong>
+              <span>连接只读视图 v_ann_flow / v_events</span>
             </div>
             <div id="error-state" class="state-panel state-panel--error" hidden>
-              <strong>鏁版嵁鏆傛椂鏃犳硶璇诲彇</strong>
-              <span id="error-message">璇风◢鍚庡埛鏂般€?/span>
+              <strong>数据暂时无法读取</strong>
+              <span id="error-message">请稍后刷新。</span>
             </div>
             <div id="event-list" class="event-list" hidden></div>
             <div id="announcement-list" class="announcement-list" hidden></div>
@@ -142,14 +142,14 @@
 
       <footer class="footer">
         <span>HEDGE MONITOR / 2026</span>
-        <span>Evidence-first 路 Read-only 路 Built for research</span>
+        <span>Evidence-first · Read-only · Built for research</span>
       </footer>
     </div>
 
-    <aside class="drawer" id="detail-drawer" aria-hidden="true" aria-label="璇︽儏">
+    <aside class="drawer" id="detail-drawer" aria-hidden="true" aria-label="详情">
       <div class="drawer-backdrop" data-close-drawer></div>
       <div class="drawer-panel">
-        <button class="drawer-close" type="button" data-close-drawer aria-label="鍏抽棴璇︽儏">脳</button>
+        <button class="drawer-close" type="button" data-close-drawer aria-label="关闭详情">×</button>
         <div id="drawer-content"></div>
       </div>
     </aside>
