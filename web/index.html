@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f3ee" />
+    <meta name="description" content="A 鑲′笂甯傚叕鍙稿鏈熶繚鍊煎叕鍛婁笌浜嬩欢鐩戞帶" />
+    <title>Hedge Monitor 路 濂椾繚鐩戞帶</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="config.js"></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="Hedge Monitor 棣栭〉">
+          <span class="brand-mark">H</span>
+          <span>
+            <strong>HEDGE MONITOR</strong>
+            <small>濂楁湡淇濆€?路 鐮旀姤寮忔暟鎹粓绔?/small>
+          </span>
+        </a>
+        <nav class="topnav" aria-label="涓诲鑸?>
+          <button class="nav-link is-active" data-view="events">浜嬩欢闈㈡澘</button>
+          <button class="nav-link" data-view="announcements">鍏憡鍘熸祦</button>
+        </nav>
+        <button class="refresh-button" id="refresh-button" type="button">
+          <span class="refresh-dot"></span>鍒锋柊鏁版嵁
+        </button>
+      </header>
+
+      <main id="top">
+        <section class="masthead">
+          <div>
+            <p class="eyebrow">DAILY HEDGE INTELLIGENCE <span>路</span> R0 PREVIEW</p>
+            <h1>鎶婂叕鍛婏紝璇绘垚<br /><em>鍙拷韪殑椋庨櫓浜嬩欢銆?/em></h1>
+            <p class="lede">浠庝笂甯傚叕鍙告姭闇蹭腑鎻愬彇鍝佺銆侀搴︺€佹湡闄愪笌瀹℃壒鍙ｅ緞锛屾部鐫€璇佹嵁鍥炲埌鍘熸枃銆?/p>
+          </div>
+          <div class="masthead-note">
+            <span class="live-indicator"><i></i>LIVE DATA</span>
+            <strong id="coverage-label">姝ｅ湪杩炴帴鏁版嵁灞傗€?/strong>
+            <span id="updated-label">璇诲彇 Supabase 鍙瑙嗗浘</span>
+          </div>
+        </section>
+
+        <section class="metric-grid" aria-label="鏁版嵁姒傝">
+          <article class="metric-card metric-card--accent">
+            <span class="metric-label">宸茬粨鏋勫寲鍏憡</span>
+            <strong id="metric-extracted">鈥?/strong>
+            <small>鍚鏂囦笌 PDF 椤电爜璇佹嵁</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">濂椾繚浜嬩欢</span>
+            <strong id="metric-events">鈥?/strong>
+            <small>鎸変竴娆″喅绛栧悎骞跺睍绀?/small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">寰呭鐞嗛槦鍒?/span>
+            <strong id="metric-pending">鈥?/strong>
+            <small>鍘嗗彶鍥炲～鎸佺画杩涜涓?/small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">澶辫触寰呭鏍?/span>
+            <strong id="metric-failed">鈥?/strong>
+            <small>涓嶈繘鍏ョ粺璁″彛寰?/small>
+          </article>
+        </section>
+
+        <section class="workspace">
+          <aside class="sidebar">
+            <div class="sidebar-block">
+              <div class="section-kicker">鐮旂┒鍙ｅ緞</div>
+              <p class="sidebar-copy">鍏堢湅浜嬩欢锛屽啀鍥炲埌鍏憡銆傞搴﹀缁堝垎鍙ｅ緞锛屼笉鎶娾€滄湭鎶湶鈥濆綋鎴?0銆?/p>
+              <div class="legend-list">
+                <span><i class="legend-dot legend-dot--commodity"></i>鍟嗗搧</span>
+                <span><i class="legend-dot legend-dot--fx"></i>澶栨眹</span>
+                <span><i class="legend-dot legend-dot--rate"></i>鍒╃巼</span>
+              </div>
+            </div>
+            <div class="sidebar-block status-block">
+              <div class="section-kicker">鏁版嵁鍋ュ悍</div>
+              <div class="status-line"><span>鏉ユ簮</span><strong>宸ㄦ疆 + iFind</strong></div>
+              <div class="status-line"><span>鎶藉彇妯″瀷</span><strong>MiniMax-M3</strong></div>
+              <div class="status-line"><span>璇佹嵁绾緥</span><strong class="status-ok">宸插惎鐢?/strong></div>
+            </div>
+            <div class="sidebar-block sidebar-footnote">
+              <span>R0 路 棰勮鐗?/span>
+              <p>褰撳墠灞曠ず鐪熷疄 Supabase 鏁版嵁銆傚巻鍙叉娊鍙栧畬鎴愬悗锛岄〉闈㈡棤闇€鏀圭増鍗冲彲缁х画澧為噺濉厖銆?/p>
+            </div>
+          </aside>
+
+          <section class="content-column">
+            <div class="content-head">
+              <div>
+                <p class="eyebrow">RESEARCH BOARD</p>
+                <h2 id="view-title">杩戞湡濂椾繚浜嬩欢</h2>
+              </div>
+              <span class="result-count" id="result-count">鈥?/span>
+            </div>
+
+            <div class="filter-bar" id="filter-bar">
+              <label class="search-field">
+                <span aria-hidden="true">鈱?/span>
+                <input id="search-input" type="search" placeholder="鎼滅储鍏徃銆佷唬鐮佹垨鍏憡鏍囬" autocomplete="off" />
+              </label>
+              <label class="select-field">
+                <span>绫诲埆</span>
+                <select id="scope-filter">
+                  <option value="all">鍏ㄩ儴</option>
+                  <option value="鍟嗗搧">鍟嗗搧</option>
+                  <option value="澶栨眹">澶栨眹</option>
+                  <option value="鍒╃巼">鍒╃巼</option>
+                </select>
+              </label>
+              <label class="select-field select-field--role">
+                <span>鍏憡瑙掕壊</span>
+                <select id="role-filter">
+                  <option value="all">鍏ㄩ儴</option>
+                  <option value="璁″垝-钁ｄ簨浼?>璁″垝 / 钁ｄ簨浼?/option>
+                  <option value="璁″垝-鑲′笢澶т細">璁″垝 / 鑲′笢澶т細</option>
+                  <option value="鍙鎬у垎鏋?>鍙鎬у垎鏋?/option>
+                  <option value="绠＄悊鍒跺害">绠＄悊鍒跺害</option>
+                  <option value="杩涘睍">杩涘睍</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="loading-state" class="state-panel">
+              <span class="loader"></span>
+              <strong>姝ｅ湪璇诲彇缁撴瀯鍖栨暟鎹?/strong>
+              <span>杩炴帴鍙瑙嗗浘 v_ann_flow / v_events</span>
+            </div>
+            <div id="error-state" class="state-panel state-panel--error" hidden>
+              <strong>鏁版嵁鏆傛椂鏃犳硶璇诲彇</strong>
+              <span id="error-message">璇风◢鍚庡埛鏂般€?/span>
+            </div>
+            <div id="event-list" class="event-list" hidden></div>
+            <div id="announcement-list" class="announcement-list" hidden></div>
+          </section>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>HEDGE MONITOR / 2026</span>
+        <span>Evidence-first 路 Read-only 路 Built for research</span>
+      </footer>
+    </div>
+
+    <aside class="drawer" id="detail-drawer" aria-hidden="true" aria-label="璇︽儏">
+      <div class="drawer-backdrop" data-close-drawer></div>
+      <div class="drawer-panel">
+        <button class="drawer-close" type="button" data-close-drawer aria-label="鍏抽棴璇︽儏">脳</button>
+        <div id="drawer-content"></div>
+      </div>
+    </aside>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
