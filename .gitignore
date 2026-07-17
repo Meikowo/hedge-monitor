@@ -1,5 +1,7 @@
 # 秘钥红线：任何 key 的值不进仓库
 .env
+.env.*
+!.env.example
 
 # 运行产物
 output/*
