@@ -125,3 +125,10 @@ companies(维表)   announcements(公告层)
 - Current data: 708 extracted, 2,678 pending, 139 failed, 1 skipped; 362 derived hedge events.
 - The 139 failures share MiniMax HTTP 402 `insufficient_balance_error (1008)`. Pause extraction until the token plan key's available quota is confirmed.
 - Recovery order: re-run probe, retry 30 failed rows, then resume 300-row batches after the small retry is stable.
+
+
+## 12. M3 frontend preview checkpoint (2026-07-18)
+
+- A real-data responsive preview is now merged under `web/`: overview metrics, event stream, announcement stream, filters, evidence drawer, quota table, and PDF links.
+- The preview reads `v_ann_flow` and `v_events` with a publishable/anon key only; no service-role credential is shipped to the browser.
+- GitHub Pages workflow is present in `.github/workflows/pages.yml`. Repository Pages still needs its Source set to `GitHub Actions` before the first public deployment.
