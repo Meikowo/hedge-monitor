@@ -118,3 +118,10 @@ companies(维表)   announcements(公告层)
 - Current queue: 360 `extracted`, 3,166 `pending`, no `failed` rows.
 - Event derivation is active: 178 `hedge_events` and 360 `event_members` were rebuilt automatically.
 - Continue `Extract Batch (LLM)` with `limit=300`; after pending reaches zero, run the full verification SQL and close R1.
+
+
+## 11. R1 quota incident checkpoint (2026-07-17)
+
+- Current data: 708 extracted, 2,678 pending, 139 failed, 1 skipped; 362 derived hedge events.
+- The 139 failures share MiniMax HTTP 402 `insufficient_balance_error (1008)`. Pause extraction until the token plan key's available quota is confirmed.
+- Recovery order: re-run probe, retry 30 failed rows, then resume 300-row batches after the small retry is stable.
