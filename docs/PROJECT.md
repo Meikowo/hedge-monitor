@@ -132,3 +132,10 @@ companies(维表)   announcements(公告层)
 - A real-data responsive preview is now merged under `web/`: overview metrics, event stream, announcement stream, filters, evidence drawer, quota table, and PDF links.
 - The preview reads `v_ann_flow` and `v_events` with a publishable/anon key only; no service-role credential is shipped to the browser.
 - GitHub Pages workflow is present in `.github/workflows/pages.yml`. Repository Pages still needs its Source set to `GitHub Actions` before the first public deployment.
+
+
+## 13. M3 encoding and density fix (2026-07-18)
+
+- Restored the frontend files as valid UTF-8 after identifying the initial GitHub connector upload transcoding issue.
+- Tightened the white research-terminal layout with denser event rows, smaller masthead/metric cards, finer borders, and stronger table hierarchy while preserving mobile stacking.
+- Verified the public read-only Supabase views remain available and merged the fix through PR #9.
