@@ -110,3 +110,11 @@ companies(维表)   announcements(公告层)
 - 2026 announcements backfill verified in the new Supabase project: 3,526 rows, covering 2026-01-01 through 2026-07-15.
 - All 3,526 rows are currently `pending`; `extractions` is still empty by design.
 - Next action: run `Extract Batch (LLM)` with `limit=300` for the first batch, inspect the result, then continue in batches.
+
+
+## 10. R1 extraction checkpoint (2026-07-17)
+
+- First LLM batch completed successfully: 360 extracted announcements, all with text length and PDF page evidence.
+- Current queue: 360 `extracted`, 3,166 `pending`, no `failed` rows.
+- Event derivation is active: 178 `hedge_events` and 360 `event_members` were rebuilt automatically.
+- Continue `Extract Batch (LLM)` with `limit=300`; after pending reaches zero, run the full verification SQL and close R1.
