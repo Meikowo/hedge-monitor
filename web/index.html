@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f5f3ee" />
+    <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="A 股上市公司套期保值公告与事件监控" />
     <title>Hedge Monitor · 套保监控</title>
     <link rel="stylesheet" href="styles.css" />
@@ -17,12 +17,12 @@
           <span class="brand-mark">H</span>
           <span>
             <strong>HEDGE MONITOR</strong>
-            <small>套期保值 · 研报式数据终端</small>
+            <small>套期保值数据</small>
           </span>
         </a>
         <nav class="topnav" aria-label="主导航">
-          <button class="nav-link is-active" data-view="events">事件面板</button>
-          <button class="nav-link" data-view="announcements">公告原流</button>
+          <button class="nav-link is-active" data-view="events">事件</button>
+          <button class="nav-link" data-view="announcements">公告</button>
         </nav>
         <button class="refresh-button" id="refresh-button" type="button">
           <span class="refresh-dot"></span>刷新数据
@@ -32,9 +32,8 @@
       <main id="top">
         <section class="masthead">
           <div>
-            <p class="eyebrow">DAILY HEDGE INTELLIGENCE <span>·</span> R0 PREVIEW</p>
-            <h1>把公告，读成<br /><em>可追踪的风险事件。</em></h1>
-            <p class="lede">从上市公司披露中提取品种、额度、期限与审批口径，沿着证据回到原文。</p>
+            <p class="eyebrow">HEDGE MONITOR <span>·</span> DATA</p>
+            <h1>套保事件</h1>
           </div>
           <div class="masthead-note">
             <span class="live-indicator"><i></i>LIVE DATA</span>
@@ -47,30 +46,29 @@
           <article class="metric-card metric-card--accent">
             <span class="metric-label">已结构化公告</span>
             <strong id="metric-extracted">—</strong>
-            <small>含正文与 PDF 页码证据</small>
+            <small>extractions / extracted</small>
           </article>
           <article class="metric-card">
             <span class="metric-label">套保事件</span>
             <strong id="metric-events">—</strong>
-            <small>按一次决策合并展示</small>
+            <small>hedge_events</small>
           </article>
           <article class="metric-card">
             <span class="metric-label">待处理队列</span>
             <strong id="metric-pending">—</strong>
-            <small>历史回填持续进行中</small>
+            <small>announcements / pending</small>
           </article>
           <article class="metric-card">
             <span class="metric-label">失败待复核</span>
             <strong id="metric-failed">—</strong>
-            <small>不进入统计口径</small>
+            <small>announcements / failed</small>
           </article>
         </section>
 
         <section class="workspace">
           <aside class="sidebar">
             <div class="sidebar-block">
-              <div class="section-kicker">研究口径</div>
-              <p class="sidebar-copy">先看事件，再回到公告。额度始终分口径，不把“未披露”当成 0。</p>
+              <div class="section-kicker">类别</div>
               <div class="legend-list">
                 <span><i class="legend-dot legend-dot--commodity"></i>商品</span>
                 <span><i class="legend-dot legend-dot--fx"></i>外汇</span>
@@ -78,21 +76,21 @@
               </div>
             </div>
             <div class="sidebar-block status-block">
-              <div class="section-kicker">数据健康</div>
+              <div class="section-kicker">数据状态</div>
               <div class="status-line"><span>来源</span><strong>巨潮 + iFind</strong></div>
               <div class="status-line"><span>抽取模型</span><strong>MiniMax-M3</strong></div>
               <div class="status-line"><span>证据纪律</span><strong class="status-ok">已启用</strong></div>
             </div>
             <div class="sidebar-block sidebar-footnote">
-              <span>R0 · 预览版</span>
-              <p>当前展示真实 Supabase 数据。历史抽取完成后，页面无需改版即可继续增量填充。</p>
+              <span>数据源</span>
+              <p>巨潮公告<br />iFind 公司维表</p>
             </div>
           </aside>
 
           <section class="content-column">
             <div class="content-head">
               <div>
-                <p class="eyebrow">RESEARCH BOARD</p>
+                <p class="eyebrow">EVENTS</p>
                 <h2 id="view-title">近期套保事件</h2>
               </div>
               <span class="result-count" id="result-count">—</span>
@@ -142,7 +140,7 @@
 
       <footer class="footer">
         <span>HEDGE MONITOR / 2026</span>
-        <span>Evidence-first · Read-only · Built for research</span>
+        <span>Supabase · 只读视图</span>
       </footer>
     </div>
 
