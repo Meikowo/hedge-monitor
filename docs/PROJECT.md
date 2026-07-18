@@ -151,3 +151,9 @@ companies(维表)   announcements(公告层)
 - The source layers remain intact: 1,068 extraction rows and 1,516 quota items.
 - `hedge_events` and `event_members` are both empty because the failed full rebuild cleared the derived layer before the duplicate-key insert failed.
 - Immediate recovery: run the new `Build Events` workflow on `main`, verify the derived counts, then resume 300-row extraction batches with `retry_failed=false`.
+
+## 17. R1 event rebuild verified (2026-07-18)
+
+- The standalone `Build Events` workflow completed successfully after the deterministic key fix.
+- Verified state: 543 events, 1,067 event members, 350 multi-announcement events, zero orphan members, and zero hedge-related extractions without an event membership.
+- Resume `Extract Batch (LLM)` with `limit=300`, blank date, and `retry_failed=false`; handle the 85 failed rows only after pending reaches zero.
