@@ -18,6 +18,7 @@ build_events.py —— 事件层聚合（去重的核心）
 同一事件；待真实数据验证后在 v2 细化。
 
 运行方式：全量重建（先清空事件层再重算），天然幂等。
+未匹配计划的进展类公告使用 ann_id 作为稳定后缀，避免同公司、同年度、同类别的多条进展公告生成相同主键。
   python scripts/build_events.py
   python scripts/build_events.py --dry-run
 """
@@ -80,7 +81,10 @@ class Event:
         scope_key = "+".join(sorted(scopes_of(ann))) or "未披露"
         self.key = f"{ann['code']}|{year}|{scope_key}"
         if standalone_progress:
-            self.key += "|p"
+            # 同一公司/年度/类别可能有多条未匹配计划的进展公告；
+            # 仅使用 |p 会让多个 Event 共享 event_key，最终在写库时触发 23505。
+            # ann_id 是公告层主键，作为后缀可保证稳定且可重跑。
+            self.key += f"|p|{ann['ann_id']}"
         self.code, self.year = ann["code"], year
         self.scopes: set[str] = set()
         self.members: list[dict] = []
@@ -208,6 +212,10 @@ def main() -> None:
     log(f"参与聚合的套保相关公告 {len(rows)} 条")
     events = group(rows)
     ev_rows, member_rows = build_rows(events)
+    keys = [row["event_key"] for row in ev_rows]
+    duplicate_keys = sorted({key for key in keys if keys.count(key) > 1})
+    if duplicate_keys:
+        raise RuntimeError(f"聚合生成重复 event_key：{duplicate_keys[:5]}")
     log(f"聚合为 {len(ev_rows)} 个事件；多公告事件 "
         f"{sum(1 for e in ev_rows if e['ann_count'] > 1)} 个")
 
