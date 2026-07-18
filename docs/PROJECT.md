@@ -136,7 +136,7 @@ companies(维表)   announcements(公告层)
 - Replaced the narrative hero and product-purpose copy with a direct real-data view titled “套保事件”.
 - Adopted a shadcn/ui-inspired light system: white background, neutral colors, fine borders, small radii, compact controls, and strong information hierarchy.
 - Preserved event/announcement switching, real metrics, filters, evidence drawer, and mobile layout.
-- Local implementation is complete; GitHub synchronization is pending connector write approval.
+- The implementation was synchronized and merged to `main` through PR #11; Pages redeployment is the remaining publication check.
 
 ## 15. R1 event rebuild primary-key fix (2026-07-18)
 
@@ -144,3 +144,10 @@ companies(维表)   announcements(公告层)
 - Unmatched progress keys now append the stable source `ann_id`; a pre-write duplicate-key guard was also added.
 - The reported `PostgREST 409 / 23505` occurred after LLM extraction completed, during derived event rebuilding; no new LLM extraction is required for the already completed batch.
 - Added a manual `Build Events` workflow so derived-event rebuilds can be retried without invoking the LLM extraction step again.
+
+## 16. R1 recovery checkpoint after PR #11 (2026-07-18)
+
+- Current queue: 1,067 extracted, 2,378 pending, 85 failed, 1 irrelevant, and 1 skipped announcement.
+- The source layers remain intact: 1,068 extraction rows and 1,516 quota items.
+- `hedge_events` and `event_members` are both empty because the failed full rebuild cleared the derived layer before the duplicate-key insert failed.
+- Immediate recovery: run the new `Build Events` workflow on `main`, verify the derived counts, then resume 300-row extraction batches with `retry_failed=false`.
