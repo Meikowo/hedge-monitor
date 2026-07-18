@@ -103,39 +103,44 @@ companies(维表)   announcements(公告层)
 - 质量评测会话（R3）：2–3 份典型公告 PDF（商品/外汇/进展各一）+ 你手工认定的
   正确抽取值（金标准雏形）
 - 前端会话（M3）：2–3 个你喜欢的参考站或风格描述 + 桌面/手机使用比例
-
-
 ## 9. R1 checkpoint (2026-07-17)
 
 - 2026 announcements backfill verified in the new Supabase project: 3,526 rows, covering 2026-01-01 through 2026-07-15.
 - All 3,526 rows are currently `pending`; `extractions` is still empty by design.
 - Next action: run `Extract Batch (LLM)` with `limit=300` for the first batch, inspect the result, then continue in batches.
-
-
 ## 10. R1 extraction checkpoint (2026-07-17)
 
 - First LLM batch completed successfully: 360 extracted announcements, all with text length and PDF page evidence.
 - Current queue: 360 `extracted`, 3,166 `pending`, no `failed` rows.
 - Event derivation is active: 178 `hedge_events` and 360 `event_members` were rebuilt automatically.
 - Continue `Extract Batch (LLM)` with `limit=300`; after pending reaches zero, run the full verification SQL and close R1.
-
-
 ## 11. R1 quota incident checkpoint (2026-07-17)
 
 - Current data: 708 extracted, 2,678 pending, 139 failed, 1 skipped; 362 derived hedge events.
 - The 139 failures share MiniMax HTTP 402 `insufficient_balance_error (1008)`. Pause extraction until the token plan key's available quota is confirmed.
 - Recovery order: re-run probe, retry 30 failed rows, then resume 300-row batches after the small retry is stable.
-
-
 ## 12. M3 frontend preview checkpoint (2026-07-18)
 
 - A real-data responsive preview is now merged under `web/`: overview metrics, event stream, announcement stream, filters, evidence drawer, quota table, and PDF links.
 - The preview reads `v_ann_flow` and `v_events` with a publishable/anon key only; no service-role credential is shipped to the browser.
 - GitHub Pages workflow is present in `.github/workflows/pages.yml`. Repository Pages still needs its Source set to `GitHub Actions` before the first public deployment.
 
-
 ## 13. M3 encoding and density fix (2026-07-18)
 
 - Restored the frontend files as valid UTF-8 after identifying the initial GitHub connector upload transcoding issue.
 - Tightened the white research-terminal layout with denser event rows, smaller masthead/metric cards, finer borders, and stronger table hierarchy while preserving mobile stacking.
 - Verified the public read-only Supabase views remain available and merged the fix through PR #9.
+
+## 14. M3 shadcn light data terminal direction (2026-07-18)
+
+- Replaced the narrative hero and product-purpose copy with a direct real-data view titled “套保事件”.
+- Adopted a shadcn/ui-inspired light system: white background, neutral colors, fine borders, small radii, compact controls, and strong information hierarchy.
+- Preserved event/announcement switching, real metrics, filters, evidence drawer, and mobile layout.
+- Local implementation is complete; GitHub synchronization is pending connector write approval.
+
+## 15. R1 event rebuild primary-key fix (2026-07-18)
+
+- `build_events.py` previously used the same `|p` suffix for every unmatched progress event under the same company/year/scope, allowing duplicate `event_key` values inside one rebuild batch.
+- Unmatched progress keys now append the stable source `ann_id`; a pre-write duplicate-key guard was also added.
+- The reported `PostgREST 409 / 23505` occurred after LLM extraction completed, during derived event rebuilding; no new LLM extraction is required for the already completed batch.
+- Added a manual `Build Events` workflow so derived-event rebuilds can be retried without invoking the LLM extraction step again.
