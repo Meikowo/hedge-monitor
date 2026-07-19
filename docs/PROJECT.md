@@ -78,7 +78,7 @@ companies(维表)   announcements(公告层)
 | R1 | 回填 2026 + 清积压 + 首轮 verify.sql 全量回贴 | ✅ 2026 公告积压与失败项已清零，事件层重建完成 |
 | R2 | 逐年回填 2025→2021，每年配抽取清零（挂机） | ⏸ |
 | R3 | 抽取质量金标准评测：50 份人工标注 vs 抽取结果，字段级准确率 | ⏸ 建议 R1 后 |
-| M3 | 前端正式版（PRD 7.x + 设计语言 7.6，先视觉方向稿再落码） | 🔄 A 高密度工作台 + C 右侧证据详情已完成本地 v1，待同步发布 |
+| M3 | 前端正式版（PRD 7.x + 设计语言 7.6，先视觉方向稿再落码） | ✅ v1 已部署：高密度事件研究 + 证据详情 + 数据看板 + CSV 导出 |
 | M4a/b | 定期报告（年报+半年报）采集与解析，periodic_derivatives 建表随其迁移 | ⏸ 最硬最后 |
 | M5 | 计划 vs 实际三维核对（PRD 5.6） | ⏸ 依赖 M4 |
 
@@ -172,4 +172,5 @@ companies(维表)   announcements(公告层)
 - Added client-side aggregates for yearly company/event coverage, industry and enterprise-nature company coverage, scope and approval event distributions, and event-field completeness.
 - Added UTF-8 CSV export for the complete current filtered result set in both event and announcement views.
 - Dashboard aggregation reuses the fully paginated `v_events` payload, so this stage adds no schema, database-write, or LLM cost.
+- GitHub Pages deployment completed successfully from commit `f4efcfef`; the public HTML, JavaScript, CSS, and UTF-8 Chinese text were verified online.
 
