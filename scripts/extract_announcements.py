@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import sys
 import tempfile
@@ -304,14 +305,22 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--since", help="只抽该日期后发布的 YYYY-MM-DD")
     ap.add_argument("--retry-failed", action="store_true", help="把 failed 一并重试")
+    ap.add_argument("--max-consecutive-failures", type=int, default=0,
+                    help="连续失败达到该数量时熔断；0 表示关闭")
     ap.add_argument("--ids", nargs="+", help="只抽指定 ann_id（调试用）")
     ap.add_argument("--dry-run", action="store_true", help="抽取但不写库")
     args = ap.parse_args()
 
     todo = fetch_pending(args.limit, args.since, args.retry_failed, args.ids)
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as f:
+            f.write(f"selected_count={len(todo)}\n")
     log(f"待抽取 {len(todo)} 条（limit={args.limit}）")
     stats: dict[str, int] = {}
     report = []
+    consecutive_failures = 0
+    circuit_tripped = False
     for i, r in enumerate(todo, 1):
         log(f"[{i}/{len(todo)}] {r.get('name')} {r.get('code')} | {(r.get('title') or '')[:44]}")
         try:
@@ -325,12 +334,24 @@ def main() -> None:
         stats[outcome] = stats.get(outcome, 0) + 1
         report.append({"ann_id": r["ann_id"], "code": r.get("code"),
                        "title": r.get("title"), "outcome": outcome})
+        consecutive_failures = consecutive_failures + 1 if outcome == "failed" else 0
+        if (args.max_consecutive_failures > 0 and
+                consecutive_failures >= args.max_consecutive_failures):
+            circuit_tripped = True
+            warn(f"连续失败 {consecutive_failures} 条，触发熔断；剩余公告保留 pending")
+            break
         time.sleep(0.4)
     log(f"完成: {stats}")
     snapshot_csv("extract_run", report)
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as f:
+            f.write(f"processed_count={len(report)}\n")
+    if circuit_tripped:
+        raise SystemExit(2)
     if stats.get("failed", 0) > max(3, len(todo) * 0.3):
         raise SystemExit(1)  # 失败率异常时让 Actions 标红提醒
 
 
 if __name__ == "__main__":
     main()
+
