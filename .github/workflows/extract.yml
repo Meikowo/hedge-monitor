@@ -1,6 +1,6 @@
 name: Extract Batch (LLM)
 
-# 手动清积压：反复触发直到 pending 清零。抽完自动重建事件层。
+# 历史积压自动清理 + 手动补跑。定时任务只处理 pending，不自动重试 failed。
 on:
   workflow_dispatch:
     inputs:
@@ -15,9 +15,13 @@ on:
         description: '同时重试 failed（true/false）'
         required: false
         default: 'false'
+  schedule:
+    # UTC 02:30/08:30/14:30/20:30 = 北京 10:30/16:30/22:30/04:30
+    - cron: '30 2,8,14,20 * * *'
 
 concurrency:
-  group: extract
+  # 抽取也会从巨潮下载 PDF，与 daily/backfill/audit 共用串行锁，避免机房风控与重复取数。
+  group: cninfo
   cancel-in-progress: false
 
 jobs:
@@ -31,25 +35,29 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - name: Extract
+        id: extract
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
-          CMD="python scripts/extract_announcements.py --limit ${{ github.event.inputs.limit || '300' }}"
+          LIMIT="${{ github.event.inputs.limit || '300' }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then LIMIT="600"; fi
+          CMD="python scripts/extract_announcements.py --limit $LIMIT --max-consecutive-failures 8"
           if [ -n "${{ github.event.inputs.since }}" ]; then CMD="$CMD --since ${{ github.event.inputs.since }}"; fi
           if [ "${{ github.event.inputs.retry_failed }}" = "true" ]; then CMD="$CMD --retry-failed"; fi
           $CMD
       - name: Build events
-        if: always()
+        if: always() && steps.extract.outputs.selected_count != '0'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/build_events.py
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.extract.outputs.selected_count != '0'
         with:
           name: extract-${{ github.run_id }}
           path: output/*.csv
           if-no-files-found: ignore
           retention-days: 14
+
