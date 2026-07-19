@@ -3,7 +3,7 @@
 > 用途：每次与 Claude 开新会话时上传本文件（或放入 Claude Project 知识库）。
 > 由你维护；每次会话结束让 Claude 输出更新段落，你替换后 commit。
 > 需求的唯一基准是 docs/PRD.md（v1.2），本文件记录"现状与决策"，不复述需求。
-> 最后更新：2026-07-17（R0 部署验收与公司维表导入完成）
+> 最后更新：2026-07-20（R2 历史抽取自动化）
 
 ## 1. 一句话定位
 
@@ -24,8 +24,8 @@
 - **前端**：GitHub Pages 静态站（M3 重做），数据通路定为 **anon key 直连
   Supabase + RLS 只读**（策略已随 001_init.sql 就位）；读取契约=视图
   v_ann_flow / v_events。设计语言按 PRD 7.6「研报纸感的数据终端」。
-- **调度**：daily（北京03:00）/ audit（每月1日）自动；backfill / extract /
-  import-companies / probe 手动触发。
+- **调度**：daily（北京03:00）负责公告采集；extract 每6小时自动抽取最多600条
+  pending；audit（每月1日）自动补漏；backfill / import-companies / probe 手动触发。
 
 ## 3. 数据模型（三层，契约详见 docs/schema_snapshot.md）
 
@@ -76,7 +76,7 @@ companies(维表)   announcements(公告层)
 | R0.3 | 用户侧部署 8 步（README 首次部署节） | ✅ 已完成核心部署 |
 | R0.4 | MiniMax@Actions 探活结论 | ✅ Actions 探活成功 |
 | R1 | 回填 2026 + 清积压 + 首轮 verify.sql 全量回贴 | ✅ 2026 公告积压与失败项已清零，事件层重建完成 |
-| R2 | 逐年回填 2025→2021，每年配抽取清零（挂机） | ⏸ |
+| R2 | 逐年回填 2025→2021，每年配抽取清零（挂机） | 🔄 2025 已回填，自动抽取已启用 |
 | R3 | 抽取质量金标准评测：50 份人工标注 vs 抽取结果，字段级准确率 | ⏸ 建议 R1 后 |
 | M3 | 前端正式版（PRD 7.x + 设计语言 7.6，先视觉方向稿再落码） | ✅ v1 已部署：高密度事件研究 + 证据详情 + 数据看板 + CSV 导出 |
 | M4a/b | 定期报告（年报+半年报）采集与解析，periodic_derivatives 建表随其迁移 | ⏸ 最硬最后 |
@@ -173,4 +173,13 @@ companies(维表)   announcements(公告层)
 - Added UTF-8 CSV export for the complete current filtered result set in both event and announcement views.
 - Dashboard aggregation reuses the fully paginated `v_events` payload, so this stage adds no schema, database-write, or LLM cost.
 - GitHub Pages deployment completed successfully from commit `f4efcfef`; the public HTML, JavaScript, CSS, and UTF-8 Chinese text were verified online.
+
+## 20. R2 unattended historical extraction (2026-07-20)
+
+- 2025 backfill completed with 4,920 unique announcement candidates across all 12 months and zero duplicate artifact rows.
+- `Extract Batch (LLM)` now runs every 6 hours at Beijing 04:30/10:30/16:30/22:30 and processes at most 600 pending rows per scheduled run.
+- Empty queues skip LLM calls and event rebuilds; automatic runs never include failed rows.
+- Eight consecutive failures trip a circuit breaker, leave untouched announcements pending, and mark the workflow red for inspection.
+- Scheduled extraction shares the repository-wide `cninfo` concurrency group with daily/backfill/audit, so PDF downloads and announcement queries do not overlap.
+- The scheduled Daily Pipeline now fetches announcements only; its LLM/build steps remain available on manual dispatch and no longer compete with historical scheduled extraction.
 
