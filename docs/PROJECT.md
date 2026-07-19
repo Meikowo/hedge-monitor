@@ -75,10 +75,10 @@ companies(维表)   announcements(公告层)
 | R0.2 | 采集/审计/抽取/事件/导入五条管线 + 6 workflows | ✅ 已合并 main |
 | R0.3 | 用户侧部署 8 步（README 首次部署节） | ✅ 已完成核心部署 |
 | R0.4 | MiniMax@Actions 探活结论 | ✅ Actions 探活成功 |
-| R1 | 回填 2026 + 清积压 + 首轮 verify.sql 全量回贴 | 🔄 进行中：公司维表已导入 |
+| R1 | 回填 2026 + 清积压 + 首轮 verify.sql 全量回贴 | ✅ 2026 公告积压与失败项已清零，事件层重建完成 |
 | R2 | 逐年回填 2025→2021，每年配抽取清零（挂机） | ⏸ |
 | R3 | 抽取质量金标准评测：50 份人工标注 vs 抽取结果，字段级准确率 | ⏸ 建议 R1 后 |
-| M3 | 前端正式版（PRD 7.x + 设计语言 7.6，先视觉方向稿再落码） | ⏸ 数据初具规模后 |
+| M3 | 前端正式版（PRD 7.x + 设计语言 7.6，先视觉方向稿再落码） | 🔄 A 高密度工作台 + C 右侧证据详情已完成本地 v1，待同步发布 |
 | M4a/b | 定期报告（年报+半年报）采集与解析，periodic_derivatives 建表随其迁移 | ⏸ 最硬最后 |
 | M5 | 计划 vs 实际三维核对（PRD 5.6） | ⏸ 依赖 M4 |
 
@@ -157,3 +157,19 @@ companies(维表)   announcements(公告层)
 - The standalone `Build Events` workflow completed successfully after the deterministic key fix.
 - Verified state: 543 events, 1,067 event members, 350 multi-announcement events, zero orphan members, and zero hedge-related extractions without an event membership.
 - Resume `Extract Batch (LLM)` with `limit=300`, blank date, and `retry_failed=false`; handle the 85 failed rows only after pending reaches zero.
+
+## 18. R1 closed and M3 formal frontend v1 (2026-07-19)
+
+- R1 queue is closed: 3,516 extracted, 5 irrelevant, 11 skipped, 0 pending, and 0 failed announcements.
+- Derived layer rebuilt successfully: 1,721 hedge events across 1,515 companies, including 1,210 multi-announcement events.
+- M3 visual direction is fixed as the shadcn-style dense workspace (A) with an on-demand research evidence drawer (C).
+- The local frontend now reads all event rows with API pagination, provides search/filter/sort/page controls, lazy-loads the announcement stream, and fetches related announcement evidence only when an event is opened.
+- Browser data access continues to use the publishable key and RLS-protected read-only views; no service-role credential is exposed. The formal v1 is pending source synchronization and Pages publication.
+
+## 19. M3 dashboard and export workspace (2026-07-19)
+
+- Replaced the non-interactive sidebar dimension labels with three real workspaces: dashboard, event research, and announcement flow.
+- Added client-side aggregates for yearly company/event coverage, industry and enterprise-nature company coverage, scope and approval event distributions, and event-field completeness.
+- Added UTF-8 CSV export for the complete current filtered result set in both event and announcement views.
+- Dashboard aggregation reuses the fully paginated `v_events` payload, so this stage adds no schema, database-write, or LLM cost.
+
