@@ -4,102 +4,142 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#ffffff" />
-    <meta name="description" content="A 股上市公司套期保值公告与事件监控" />
-    <title>Hedge Monitor · 套保监控</title>
+    <meta name="description" content="A 股上市公司套期保值事件与公告数据终端" />
+    <title>Hedge Monitor · 套保事件</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="config.js"></script>
     <script src="app.js" defer></script>
   </head>
   <body>
-    <div class="shell">
-      <header class="topbar">
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
         <a class="brand" href="#top" aria-label="Hedge Monitor 首页">
           <span class="brand-mark">H</span>
-          <span>
+          <span class="brand-copy">
             <strong>HEDGE MONITOR</strong>
             <small>套期保值数据</small>
           </span>
         </a>
-        <nav class="topnav" aria-label="主导航">
-          <button class="nav-link is-active" data-view="events">事件</button>
-          <button class="nav-link" data-view="announcements">公告</button>
+
+        <div class="sidebar-label">工作区</div>
+        <nav class="side-nav">
+          <button class="side-link" type="button" data-view="dashboard">
+            <span>数据看板</span><strong>概览</strong>
+          </button>
+          <button class="side-link is-active" type="button" data-view="events">
+            <span>套保事件</span><strong id="nav-events-count">—</strong>
+          </button>
+          <button class="side-link" type="button" data-view="announcements">
+            <span>公告原流</span><strong id="nav-announcements-count">—</strong>
+          </button>
         </nav>
-        <button class="refresh-button" id="refresh-button" type="button">
-          <span class="refresh-dot"></span>刷新数据
-        </button>
-      </header>
 
-      <main id="top">
-        <section class="masthead">
-          <div>
-            <p class="eyebrow">HEDGE MONITOR <span>·</span> DATA</p>
-            <h1>套保事件</h1>
+        <div class="sidebar-status">
+          <div><span class="status-dot"></span><strong id="connection-label">正在连接</strong></div>
+          <span id="sidebar-updated">Supabase · 只读</span>
+        </div>
+      </aside>
+
+      <div class="main-column">
+        <header class="topbar">
+          <div class="breadcrumb"><strong>套保监控</strong><span>/</span><span id="breadcrumb-view">事件</span></div>
+          <div class="topbar-actions">
+            <span class="data-date" id="data-date">数据更新中</span>
+            <button class="button button--secondary" id="refresh-button" type="button">刷新数据</button>
           </div>
-          <div class="masthead-note">
-            <span class="live-indicator"><i></i>LIVE DATA</span>
-            <strong id="coverage-label">正在连接数据层…</strong>
-            <span id="updated-label">读取 Supabase 只读视图</span>
-          </div>
-        </section>
+        </header>
 
-        <section class="metric-grid" aria-label="数据概览">
-          <article class="metric-card metric-card--accent">
-            <span class="metric-label">已结构化公告</span>
-            <strong id="metric-extracted">—</strong>
-            <small>extractions / extracted</small>
-          </article>
-          <article class="metric-card">
-            <span class="metric-label">套保事件</span>
-            <strong id="metric-events">—</strong>
-            <small>hedge_events</small>
-          </article>
-          <article class="metric-card">
-            <span class="metric-label">待处理队列</span>
-            <strong id="metric-pending">—</strong>
-            <small>announcements / pending</small>
-          </article>
-          <article class="metric-card">
-            <span class="metric-label">失败待复核</span>
-            <strong id="metric-failed">—</strong>
-            <small>announcements / failed</small>
-          </article>
-        </section>
+        <main id="top" class="main-content">
+          <section class="page-heading">
+            <div>
+              <h1 id="page-title">套保事件</h1>
+              <p id="page-subtitle">按公司、年度与类别聚合</p>
+            </div>
+            <div class="page-heading-actions">
+              <button class="button button--secondary" id="clear-filters" type="button">清除筛选</button>
+            </div>
+          </section>
 
-        <section class="workspace">
-          <aside class="sidebar">
-            <div class="sidebar-block">
-              <div class="section-kicker">类别</div>
-              <div class="legend-list">
-                <span><i class="legend-dot legend-dot--commodity"></i>商品</span>
-                <span><i class="legend-dot legend-dot--fx"></i>外汇</span>
-                <span><i class="legend-dot legend-dot--rate"></i>利率</span>
-              </div>
-            </div>
-            <div class="sidebar-block status-block">
-              <div class="section-kicker">数据状态</div>
-              <div class="status-line"><span>来源</span><strong>巨潮 + iFind</strong></div>
-              <div class="status-line"><span>抽取模型</span><strong>MiniMax-M3</strong></div>
-              <div class="status-line"><span>证据纪律</span><strong class="status-ok">已启用</strong></div>
-            </div>
-            <div class="sidebar-block sidebar-footnote">
-              <span>数据源</span>
-              <p>巨潮公告<br />iFind 公司维表</p>
-            </div>
-          </aside>
+          <section class="metric-grid" id="metric-grid" aria-label="数据概览">
+            <article class="metric-card">
+              <span>套保事件</span>
+              <strong id="metric-events">—</strong>
+              <small>hedge_events</small>
+            </article>
+            <article class="metric-card">
+              <span>结构化公告</span>
+              <strong id="metric-extracted">—</strong>
+              <small>extracted</small>
+            </article>
+            <article class="metric-card">
+              <span>覆盖公司</span>
+              <strong id="metric-companies">—</strong>
+              <small>distinct companies</small>
+            </article>
+            <article class="metric-card">
+              <span>多公告事件</span>
+              <strong id="metric-multi">—</strong>
+              <small>ann_count &gt; 1</small>
+            </article>
+          </section>
 
-          <section class="content-column">
-            <div class="content-head">
-              <div>
-                <p class="eyebrow">EVENTS</p>
-                <h2 id="view-title">近期套保事件</h2>
-              </div>
-              <span class="result-count" id="result-count">—</span>
-            </div>
+          <section class="dashboard-view" id="dashboard-view" hidden>
+            <div class="dashboard-grid">
+              <article class="chart-card chart-card--wide">
+                <header class="chart-header">
+                  <div><span>年度覆盖</span><h2>公司与事件趋势</h2></div>
+                  <small>公司数按股票代码去重</small>
+                </header>
+                <div class="year-chart" id="year-chart"></div>
+              </article>
 
-            <div class="filter-bar" id="filter-bar">
+              <article class="chart-card">
+                <header class="chart-header">
+                  <div><span>企业性质</span><h2>覆盖公司分布</h2></div>
+                  <small>去重公司数</small>
+                </header>
+                <div class="bar-chart" id="type-chart"></div>
+              </article>
+
+              <article class="chart-card">
+                <header class="chart-header">
+                  <div><span>套保类别</span><h2>事件结构</h2></div>
+                  <small>多标签事件可能重复计数</small>
+                </header>
+                <div class="bar-chart" id="scope-chart"></div>
+              </article>
+
+              <article class="chart-card chart-card--wide">
+                <header class="chart-header">
+                  <div><span>一级行业</span><h2>覆盖公司 Top 12</h2></div>
+                  <small>主值为公司数，右侧同时显示事件数</small>
+                </header>
+                <div class="bar-chart bar-chart--columns" id="industry-chart"></div>
+              </article>
+
+              <article class="chart-card">
+                <header class="chart-header">
+                  <div><span>审批层级</span><h2>事件审批分布</h2></div>
+                  <small>按事件数统计</small>
+                </header>
+                <div class="bar-chart" id="approval-chart"></div>
+              </article>
+
+              <article class="chart-card">
+                <header class="chart-header">
+                  <div><span>字段质量</span><h2>结构化覆盖率</h2></div>
+                  <small>按事件数统计</small>
+                </header>
+                <div class="quality-grid" id="quality-chart"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="data-panel" id="data-panel">
+            <div class="filter-row">
               <label class="search-field">
-                <span aria-hidden="true">⌕</span>
-                <input id="search-input" type="search" placeholder="搜索公司、代码或公告标题" autocomplete="off" />
+                <span class="search-mark" aria-hidden="true"></span>
+                <input id="search-input" type="search" placeholder="搜索公司、代码、品种或工具" autocomplete="off" />
               </label>
               <label class="select-field">
                 <span>类别</span>
@@ -108,50 +148,119 @@
                   <option value="商品">商品</option>
                   <option value="外汇">外汇</option>
                   <option value="利率">利率</option>
+                  <option value="综合">综合</option>
                 </select>
               </label>
-              <label class="select-field select-field--role">
-                <span>公告角色</span>
-                <select id="role-filter">
+              <label class="select-field">
+                <span>审批</span>
+                <select id="approval-filter">
                   <option value="all">全部</option>
-                  <option value="计划-董事会">计划 / 董事会</option>
-                  <option value="计划-股东大会">计划 / 股东大会</option>
-                  <option value="可行性分析">可行性分析</option>
-                  <option value="管理制度">管理制度</option>
-                  <option value="进展">进展</option>
+                  <option value="董事会">董事会</option>
+                  <option value="股东大会">股东大会</option>
+                  <option value="董事会及股东大会">两级审批</option>
+                  <option value="未披露">未披露</option>
+                </select>
+              </label>
+              <label class="select-field">
+                <span>企业性质</span>
+                <select id="type-filter">
+                  <option value="all">全部</option>
+                  <option value="央企">央企</option>
+                  <option value="地方国企">地方国企</option>
+                  <option value="民企">民企</option>
+                  <option value="外资">外资</option>
+                  <option value="集体">集体</option>
+                  <option value="其他">其他</option>
                 </select>
               </label>
             </div>
 
+            <div class="table-toolbar">
+              <div class="view-tabs" role="tablist" aria-label="数据视图">
+                <button class="view-tab is-active" type="button" data-view="events" role="tab">事件</button>
+                <button class="view-tab" type="button" data-view="announcements" role="tab">公告</button>
+              </div>
+              <div class="toolbar-right">
+                <div class="result-meta">
+                  <span id="result-count">—</span>
+                  <span class="separator">·</span>
+                  <span id="page-label">—</span>
+                </div>
+                <button class="button button--secondary export-button" id="export-button" type="button">导出当前结果</button>
+              </div>
+            </div>
+
             <div id="loading-state" class="state-panel">
-              <span class="loader"></span>
+              <span class="loader" aria-hidden="true"></span>
               <strong>正在读取结构化数据</strong>
-              <span>连接只读视图 v_ann_flow / v_events</span>
+              <span>首次载入会完整分页读取事件层</span>
             </div>
             <div id="error-state" class="state-panel state-panel--error" hidden>
               <strong>数据暂时无法读取</strong>
               <span id="error-message">请稍后刷新。</span>
             </div>
-            <div id="event-list" class="event-list" hidden></div>
-            <div id="announcement-list" class="announcement-list" hidden></div>
-          </section>
-        </section>
-      </main>
 
-      <footer class="footer">
-        <span>HEDGE MONITOR / 2026</span>
-        <span>Supabase · 只读视图</span>
-      </footer>
+            <div id="events-table-wrap" class="table-scroll" hidden>
+              <table class="data-table events-table">
+                <thead>
+                  <tr>
+                    <th><button class="sort-button" type="button" data-sort="date">最新披露</button></th>
+                    <th><button class="sort-button" type="button" data-sort="company">公司</button></th>
+                    <th>类别</th>
+                    <th>阶段</th>
+                    <th>品种 / 工具</th>
+                    <th>额度</th>
+                    <th>期限</th>
+                    <th><button class="sort-button" type="button" data-sort="evidence">证据</button></th>
+                  </tr>
+                </thead>
+                <tbody id="events-body"></tbody>
+              </table>
+            </div>
+
+            <div id="announcements-table-wrap" class="table-scroll" hidden>
+              <table class="data-table announcements-table">
+                <thead>
+                  <tr>
+                    <th>披露日期</th>
+                    <th>公司</th>
+                    <th>公告标题</th>
+                    <th>角色</th>
+                    <th>类别</th>
+                    <th>置信度</th>
+                    <th>证据</th>
+                  </tr>
+                </thead>
+                <tbody id="announcements-body"></tbody>
+              </table>
+            </div>
+
+            <div class="pagination" id="pagination" hidden>
+              <button class="button button--secondary" id="prev-page" type="button">上一页</button>
+              <div id="pagination-pages" class="pagination-pages"></div>
+              <button class="button button--secondary" id="next-page" type="button">下一页</button>
+            </div>
+          </section>
+        </main>
+      </div>
     </div>
 
-    <aside class="drawer" id="detail-drawer" aria-hidden="true" aria-label="详情">
+    <aside class="detail-drawer" id="detail-drawer" aria-hidden="true" aria-label="事件详情">
       <div class="drawer-backdrop" data-close-drawer></div>
-      <div class="drawer-panel">
-        <button class="drawer-close" type="button" data-close-drawer aria-label="关闭详情">×</button>
-        <div id="drawer-content"></div>
-      </div>
+      <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+        <header class="drawer-header">
+          <div>
+            <span class="drawer-kicker" id="drawer-kicker">EVENT DETAIL</span>
+            <h2 id="drawer-title">事件详情</h2>
+            <p id="drawer-subtitle"></p>
+          </div>
+          <button class="icon-button" type="button" data-close-drawer aria-label="关闭详情">×</button>
+        </header>
+        <div class="drawer-body" id="drawer-content"></div>
+      </section>
     </aside>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>
+
