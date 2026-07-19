@@ -1,6 +1,6 @@
 name: Daily Pipeline
 
-# 北京时间凌晨 03:00 单班次：抓全前一整天 → 抽取一批 → 重建事件层
+# 北京时间凌晨 03:00 抓取公告。LLM 抽取由 extract.yml 每 6 小时统一串行处理。
 on:
   workflow_dispatch:
     inputs:
@@ -32,7 +32,8 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/fetch_announcements.py daily --days "${{ github.event.inputs.days || '3' }}"
 
-      - name: Extract (LLM)
+      - name: Extract (LLM, manual daily run only)
+        if: github.event_name == 'workflow_dispatch'
         # MiniMax 若从 Actions 不可达，本步失败不阻断事件层与次日采集（探活见 probe workflow）
         continue-on-error: true
         env:
@@ -42,6 +43,7 @@ jobs:
         run: python scripts/extract_announcements.py --limit 60 --retry-failed
 
       - name: Build events
+        if: github.event_name == 'workflow_dispatch'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -55,3 +57,4 @@ jobs:
           path: output/*.csv
           if-no-files-found: ignore
           retention-days: 14
+
