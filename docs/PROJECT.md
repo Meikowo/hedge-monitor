@@ -211,3 +211,16 @@ companies(维表)   announcements(公告层)
 - Eight consecutive failures trip a circuit breaker, leave untouched announcements pending, and mark the workflow red for inspection.
 - Scheduled extraction shares the repository-wide `cninfo` concurrency group with daily/backfill/audit, so PDF downloads and announcement queries do not overlap.
 - The scheduled Daily Pipeline now fetches announcements only; its LLM/build steps remain available on manual dispatch and no longer compete with historical scheduled extraction.
+
+## 23. M3 frontend loading resilience hotfix (2026-07-21)
+
+- Root cause: the initial page loaded every announcement status through 9 paginated requests solely to
+  calculate one metric. Together with the 4 event pages, any request that remained pending left the
+  interface on its static loading spinner indefinitely because fetch had no timeout.
+- Replaced status enumeration with one exact `HEAD` count. This changes only the top “结构化公告” metric;
+  the announcement workspace still lazy-loads complete rows, evidence, filters, details, and CSV exports.
+- Added a 20-second request timeout, up to three attempts for transient network/429/5xx failures,
+  page-by-page loading progress, a 1,000-page safety guard, and global initialization error reporting.
+- Removed unused API fields and versioned HTML asset URLs to prevent mixed old/new HTML and JavaScript
+  from browser or Pages cache.
+- Real public-API bootstrap test passed in 5.4 seconds with 3,281 events and 6,763 extracted announcements.
