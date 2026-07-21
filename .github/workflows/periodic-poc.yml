@@ -1,0 +1,68 @@
+name: Periodic Reports POC
+
+# M4a 小样本手动管线。默认步骤都不调用 LLM；extract 需二次显式确认。
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: '阶段：metadata / locate / extract'
+        required: true
+        default: 'metadata'
+        type: choice
+        options: [metadata, locate, extract]
+      limit:
+        description: 'locate/extract 最多处理份数'
+        required: false
+        default: '2'
+      confirm_llm:
+        description: 'extract 时确认产生模型调用'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: cninfo
+  cancel-in-progress: false
+
+jobs:
+  periodic-poc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Discover 2025 annual reports
+        if: inputs.stage == 'metadata'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/fetch_periodic_reports.py --fiscal-year 2025 --report-type annual --write
+      - name: Locate candidate pages (no LLM)
+        if: inputs.stage == 'locate'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/locate_periodic_pages.py --limit "${{ inputs.limit }}" --write
+      - name: Guard LLM confirmation
+        if: inputs.stage == 'extract' && !inputs.confirm_llm
+        run: |
+          echo "extract 阶段必须勾选 confirm_llm"
+          exit 2
+      - name: Extract annual reports (LLM)
+        if: inputs.stage == 'extract' && inputs.confirm_llm
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: python scripts/extract_periodic_reports.py --limit "${{ inputs.limit }}" --confirm-llm
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: periodic-poc-${{ inputs.stage }}-${{ github.run_id }}
+          path: output/*
+          if-no-files-found: ignore
+          retention-days: 30
+

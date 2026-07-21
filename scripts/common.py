@@ -175,3 +175,14 @@ def snapshot_csv(name: str, rows: list[dict]) -> Path | None:
                         for k, v in r.items()})
     log(f"快照已落盘: {path.relative_to(ROOT)}（{len(rows)} 行）")
     return path
+
+
+def snapshot_json(name: str, payload: Any) -> Path:
+    """把结构化运行证据落为 UTF-8 JSON，供候选页与模型结果复核。"""
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    ts = beijing_now().strftime("%Y%m%d_%H%M%S")
+    path = OUTPUT_DIR / f"{name}_{ts}.json"
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+    log(f"快照已落盘: {path.relative_to(ROOT)}")
+    return path

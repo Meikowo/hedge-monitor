@@ -84,6 +84,18 @@
           </section>
 
           <section class="dashboard-view" id="dashboard-view" hidden>
+            <div class="dashboard-controls">
+              <div>
+                <strong id="dashboard-year-summary">全部年份</strong>
+                <span>年份筛选应用于下方分布与质量图，年度趋势保留完整时间序列</span>
+              </div>
+              <label class="dashboard-year-filter">
+                <span>统计年份</span>
+                <select id="dashboard-year-filter" aria-label="选择数据看板统计年份">
+                  <option value="all">全部年份</option>
+                </select>
+              </label>
+            </div>
             <div class="dashboard-grid">
               <article class="chart-card chart-card--wide">
                 <header class="chart-header">
@@ -115,6 +127,14 @@
                   <small>主值为公司数，右侧同时显示事件数</small>
                 </header>
                 <div class="bar-chart bar-chart--columns" id="industry-chart"></div>
+              </article>
+
+              <article class="chart-card chart-card--wide">
+                <header class="chart-header">
+                  <div><span>所在地区</span><h2>省份覆盖 Top 16</h2></div>
+                  <small>主值为公司数，右侧同时显示事件数</small>
+                </header>
+                <div class="bar-chart bar-chart--columns" id="province-chart"></div>
               </article>
 
               <article class="chart-card">
@@ -206,6 +226,7 @@
                   <tr>
                     <th><button class="sort-button" type="button" data-sort="date">最新披露</button></th>
                     <th><button class="sort-button" type="button" data-sort="company">公司</button></th>
+                    <th>省份</th>
                     <th>类别</th>
                     <th>阶段</th>
                     <th>品种 / 工具</th>
@@ -224,6 +245,7 @@
                   <tr>
                     <th>披露日期</th>
                     <th>公司</th>
+                    <th>省份</th>
                     <th>公告标题</th>
                     <th>角色</th>
                     <th>类别</th>
@@ -263,4 +285,3 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>
-

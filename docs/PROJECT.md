@@ -3,7 +3,7 @@
 > 用途：每次与 Claude 开新会话时上传本文件（或放入 Claude Project 知识库）。
 > 由你维护；每次会话结束让 Claude 输出更新段落，你替换后 commit。
 > 需求的唯一基准是 docs/PRD.md（v1.2），本文件记录"现状与决策"，不复述需求。
-> 最后更新：2026-07-20（R2 历史抽取自动化）
+> 最后更新：2026-07-20（R2 自动抽取 + M4a 年报 POC）
 
 ## 1. 一句话定位
 
@@ -79,7 +79,7 @@ companies(维表)   announcements(公告层)
 | R2 | 逐年回填 2025→2021，每年配抽取清零（挂机） | 🔄 2025 已回填，自动抽取已启用 |
 | R3 | 抽取质量金标准评测：50 份人工标注 vs 抽取结果，字段级准确率 | ⏸ 建议 R1 后 |
 | M3 | 前端正式版（PRD 7.x + 设计语言 7.6，先视觉方向稿再落码） | ✅ v1 已部署：高密度事件研究 + 证据详情 + 数据看板 + CSV 导出 |
-| M4a/b | 定期报告（年报+半年报）采集与解析，periodic_derivatives 建表随其迁移 | ⏸ 最硬最后 |
+| M4a/b | 定期报告（年报+半年报）采集与解析 | 🔄 M4a POC：30份2025FY元数据、2份定位、1份真实抽取 |
 | M5 | 计划 vs 实际三维核对（PRD 5.6） | ⏸ 依赖 M4 |
 
 ## 7. 风险与已知局限
@@ -95,6 +95,8 @@ companies(维表)   announcements(公告层)
 5. **Supabase 免费档**：daily 每日写库天然保活；留意 Actions 断档。
 6. **公开性**：anon 可读全库（自用接受 obscurity）；如需加口令在 M3 讨论。
 7. **iFind 表时效**：季度刷新，退市/更名/性质变更在刷新间隔内滞后（可接受）。
+8. **年报复杂表格证据**：首份样本 18 条数值中 3 条数字+引文双回验通过，15 条表格值仅数字回验通过；
+   未解决表格原文对齐前不得批量扩张，也不得让未双回验数值进入图表。
 
 ## 8. 下次会话前的待补信息（视会话主题选带）
 
@@ -103,6 +105,33 @@ companies(维表)   announcements(公告层)
 - 质量评测会话（R3）：2–3 份典型公告 PDF（商品/外汇/进展各一）+ 你手工认定的
   正确抽取值（金标准雏形）
 - 前端会话（M3）：2–3 个你喜欢的参考站或风格描述 + 桌面/手机使用比例
+
+## 21. M4a annual-report POC checkpoint (2026-07-20)
+
+- Added migrations `002_periodic_reports.sql` and `003_periodic_hardening.sql`: report metadata,
+  disclosure-level extraction, reported metric facts, RLS, explicit Data API grants, security-invoker
+  views, and a fixed function search path. Supabase Security Advisor now reports zero findings.
+- Deterministic sample: 30 A-share companies, split evenly across commodity, FX, and mixed hedging,
+  with industry and ownership diversity. B-share handling is intentionally deferred after code/orgId
+  mismatch was observed for 200553.
+- Metadata discovery was changed from a capped full-market scan (10 minutes, only 4/30) to CNINFO
+  code+orgId targeted queries (about one minute, 30/30).
+- Two real PDFs were localized without LLM: JinkoSolar 289→15 pages and Beyondsoft 206→15 pages.
+- One JinkoSolar report was extracted end to end in about 101 seconds: 18 reported metric facts;
+  3 passed both literal-number and exact-quote checks, 15 table-derived quotes remain pending review.
+- No annual-report schedule is enabled. Next gate: improve table evidence alignment, manually review the
+  first two reports, then decide whether to expand from 2 to 30. See `docs/M4A_POC.md`.
+
+## 22. M3 province and multi-year dashboard checkpoint (2026-07-21)
+
+- Added the existing `province` dimension to event and announcement tables, detail drawers, full-result
+  search, and UTF-8 CSV exports. No database migration was required because both read-only views already
+  expose the company province field.
+- Added a province coverage chart (Top 16 by distinct company count, with event count alongside it).
+- Added one dashboard-wide year selector. It filters enterprise nature, scope, industry, province,
+  approval, and field-quality charts while the year trend intentionally retains the complete time series.
+- Live data verification: 2025 has 1,464 events / 1,321 companies and 1,443 rows with province; 2026 has
+  1,812 events / 1,635 companies and 1,808 rows with province.
 ## 9. R1 checkpoint (2026-07-17)
 
 - 2026 announcements backfill verified in the new Supabase project: 3,526 rows, covering 2026-01-01 through 2026-07-15.
@@ -182,4 +211,3 @@ companies(维表)   announcements(公告层)
 - Eight consecutive failures trip a circuit breaker, leave untouched announcements pending, and mark the workflow red for inspection.
 - Scheduled extraction shares the repository-wide `cninfo` concurrency group with daily/backfill/audit, so PDF downloads and announcement queries do not overlap.
 - The scheduled Daily Pipeline now fetches announcements only; its LLM/build steps remain available on manual dispatch and no longer compete with historical scheduled extraction.
-

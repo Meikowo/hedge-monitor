@@ -59,3 +59,17 @@ where ev.event_key is null;
 -- V10. 前端视图冒烟（各返回若干行即可）
 select * from v_ann_flow order by publish_time desc limit 5;
 select * from v_events order by latest_ann_date desc limit 5;
+
+-- V11. M4a 年报 POC（预期：3 张表 RLS=true；30份元数据；已抽取样本的事实均为 reported）
+select tablename, rowsecurity from pg_tables
+where schemaname = 'public' and tablename like 'periodic_%' order by tablename;
+select status, count(*) from periodic_reports group by status order by status;
+select d.report_id, r.code, r.name, r.report_period, d.disclosure_status,
+       count(m.*) as metrics,
+       count(m.*) filter (where m.value_verified and m.quote_verified) as fully_verified
+from periodic_derivatives d
+join periodic_reports r using (report_id)
+left join periodic_metric_items m using (report_id)
+group by d.report_id, r.code, r.name, r.report_period, d.disclosure_status;
+select count(*) as forbidden_non_reported
+from periodic_metric_items where value_origin <> 'reported';

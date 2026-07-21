@@ -28,6 +28,7 @@
     scope: "all",
     approval: "all",
     entType: "all",
+    dashboardYear: "all",
     page: 1,
     sortKey: "date",
     sortDirection: "desc",
@@ -248,23 +249,41 @@
       <div class="year-values"><strong>${item.companies.toLocaleString("zh-CN")}</strong> å…¬å¸<br />${item.events.toLocaleString("zh-CN")} äº‹ä»¶</div>
     </div>`).join("")}`;
 
-    const types = groupByDimension(state.events, (row) => row.ent_type).sort((a, b) => b.value - a.value);
-    const scopes = groupByDimension(state.events, (row) => row.scope, true).sort((a, b) => b.events - a.events).map((item) => ({ ...item, secondary: item.value, value: item.events }));
-    const industries = groupByDimension(state.events, (row) => row.ind_l1).sort((a, b) => b.value - a.value).slice(0, 12);
-    const approvals = groupByDimension(state.events, (row) => row.approval_level).sort((a, b) => b.events - a.events).map((item) => ({ ...item, secondary: item.value, value: item.events }));
+    renderDashboardYearOptions(years);
+    const dashboardRows = state.dashboardYear === "all"
+      ? state.events
+      : state.events.filter((row) => String(row.anchor_year || "æœªæ ‡æ³¨") === state.dashboardYear);
+    const dashboardCompanies = new Set(dashboardRows.map((row) => row.code).filter(Boolean)).size;
+    $("#dashboard-year-summary").textContent = `${state.dashboardYear === "all" ? "å…¨éƒ¨å¹´ä»½" : `${state.dashboardYear} å¹´`} Â· ${dashboardCompanies.toLocaleString("zh-CN")} å®¶å…¬å¸ Â· ${dashboardRows.length.toLocaleString("zh-CN")} ä¸ªäº‹ä»¶`;
+
+    const types = groupByDimension(dashboardRows, (row) => row.ent_type).sort((a, b) => b.value - a.value);
+    const scopes = groupByDimension(dashboardRows, (row) => row.scope, true).sort((a, b) => b.events - a.events).map((item) => ({ ...item, secondary: item.value, value: item.events }));
+    const industries = groupByDimension(dashboardRows, (row) => row.ind_l1).sort((a, b) => b.value - a.value).slice(0, 12);
+    const provinces = groupByDimension(dashboardRows, (row) => row.province).sort((a, b) => b.value - a.value).slice(0, 16);
+    const approvals = groupByDimension(dashboardRows, (row) => row.approval_level).sort((a, b) => b.events - a.events).map((item) => ({ ...item, secondary: item.value, value: item.events }));
     renderBarChart("#type-chart", types, "äº‹ä»¶");
     renderBarChart("#scope-chart", scopes, "å…¬å¸");
     renderBarChart("#industry-chart", industries, "äº‹ä»¶");
+    renderBarChart("#province-chart", provinces, "äº‹ä»¶");
     renderBarChart("#approval-chart", approvals, "å…¬å¸");
 
-    const total = Math.max(1, state.events.length);
+    const total = Math.max(1, dashboardRows.length);
     const quality = [
-      { label: "é¢åº¦å·²æŠ«éœ²", count: state.events.filter((row) => asArray(row.quota).length > 0).length },
-      { label: "å·¥å…·å­—æ®µ", count: state.events.filter((row) => asArray(row.instruments).length > 0).length },
-      { label: "å“ç§å­—æ®µ", count: state.events.filter((row) => asArray(row.underlyings).length > 0).length },
-      { label: "æœŸé™å­—æ®µ", count: state.events.filter((row) => Boolean(row.period_text)).length }
+      { label: "é¢åº¦å·²æŠ«éœ²", count: dashboardRows.filter((row) => asArray(row.quota).length > 0).length },
+      { label: "å·¥å…·å­—æ®µ", count: dashboardRows.filter((row) => asArray(row.instruments).length > 0).length },
+      { label: "å“ç§å­—æ®µ", count: dashboardRows.filter((row) => asArray(row.underlyings).length > 0).length },
+      { label: "æœŸé™å­—æ®µ", count: dashboardRows.filter((row) => Boolean(row.period_text)).length }
     ];
-    $("#quality-chart").innerHTML = quality.map((item) => `<div class="quality-item"><span>${escapeHtml(item.label)}</span><strong>${(item.count / total * 100).toFixed(1)}%</strong><small>${item.count.toLocaleString("zh-CN")} / ${state.events.length.toLocaleString("zh-CN")} ä¸ªäº‹ä»¶</small></div>`).join("");
+    $("#quality-chart").innerHTML = quality.map((item) => `<div class="quality-item"><span>${escapeHtml(item.label)}</span><strong>${(item.count / total * 100).toFixed(1)}%</strong><small>${item.count.toLocaleString("zh-CN")} / ${dashboardRows.length.toLocaleString("zh-CN")} ä¸ªäº‹ä»¶</small></div>`).join("");
+  }
+
+  function renderDashboardYearOptions(years) {
+    const select = $("#dashboard-year-filter");
+    const options = [...years].sort((a, b) => String(b.year).localeCompare(String(a.year)));
+    const validValues = new Set(["all", ...options.map((item) => String(item.year))]);
+    if (!validValues.has(state.dashboardYear)) state.dashboardYear = "all";
+    select.innerHTML = '<option value="all">å…¨éƒ¨å¹´ä»½</option>' + options.map((item) => `<option value="${escapeHtml(item.year)}">${escapeHtml(item.year)} å¹´</option>`).join("");
+    select.value = state.dashboardYear;
   }
 
   function renderBarChart(selector, rows, secondaryLabel) {
@@ -282,7 +301,7 @@
       row.name, row.code, row.title, row.plan_label, row.stage, row.summary,
       joinValues(row.scope, ""), joinValues(row.instruments, ""),
       joinValues(row.underlyings, ""), row.ind_l1, row.ind_l2, row.ind_l3,
-      row.ent_type, row.approval_level
+      row.ent_type, row.province, row.approval_level
     ].join(" ").toLowerCase();
     const scopeMatch = state.scope === "all" || asArray(row.scope).includes(state.scope);
     const approvalMatch = state.approval === "all" || row.approval_level === state.approval;
@@ -300,407 +319,12 @@
         right = `${b.name || ""}${b.code || ""}`;
       } else if (state.sortKey === "evidence") {
         left = Number(a.ann_count || 0);
-        right = Number(b.ann_count || 0);
-      } else {
-        left = a.latest_ann_date || "";
-        right = b.latest_ann_date || "";
-      }
-      const comparison = typeof left === "number"
-        ? left - right
-        : String(left).localeCompare(String(right), "zh-CN");
-      return state.sortDirection === "asc" ? comparison : -comparison;
-    });
-  }
-
-  function filteredAnnouncements() {
-    return (state.announcements || []).filter(matchesFilters);
-  }
-
-  function representativeQuota(event) {
-    const quotas = asArray(event.quota).filter((item) => item && item.amount !== null && item.amount !== undefined);
-    if (!quotas.length) return { amount: "æœªæŠ«éœ²", basis: "é¢åº¦å¾…åŸæ–‡ç¡®è®¤", extra: "" };
-    const first = quotas[0];
-    return {
-      amount: formatAmount(first.amount, first.currency),
-      basis: first.basis || "å·²æŠ½å–é¢åº¦",
-      extra: quotas.length > 1 ? `å¦æœ‰ ${quotas.length - 1} é¡¹` : ""
-    };
-  }
-
-  function renderCurrentView() {
-    updateViewChrome();
-    if (state.view === "dashboard") renderDashboard();
-    else if (state.view === "events") renderEvents();
-    else renderAnnouncements();
-  }
-
-  function updateViewChrome() {
-    const isDashboard = state.view === "dashboard";
-    const isEvents = state.view === "events";
-    $("#page-title").textContent = isDashboard ? "æ•°æ®çœ‹æ¿" : isEvents ? "å¥—ä¿äº‹ä»¶" : "å…¬å‘ŠåŸæµ";
-    $("#page-subtitle").textContent = isDashboard ? "å…¬å¸è¦†ç›–ã€äº‹ä»¶ç»“æ„ä¸å­—æ®µè´¨é‡" : isEvents ? "æŒ‰å…¬å¸ã€å¹´åº¦ä¸ç±»åˆ«èšåˆ" : "ç»“æ„åŒ–å…¬å‘Šä¸è¯æ®è®°å½•";
-    $("#breadcrumb-view").textContent = isDashboard ? "çœ‹æ¿" : isEvents ? "äº‹ä»¶" : "å…¬å‘Š";
-    $$('[data-view]').forEach((button) => button.classList.toggle("is-active", button.dataset.view === state.view));
-    $("#dashboard-view").hidden = !isDashboard;
-    $("#data-panel").hidden = isDashboard;
-    $("#metric-grid").hidden = state.view === "announcements";
-    $("#clear-filters").hidden = isDashboard;
-    $("#events-table-wrap").hidden = !isEvents;
-    $("#announcements-table-wrap").hidden = isEvents || isDashboard;
-    $("#error-state").hidden = true;
-  }
-
-  function renderEvents() {
-    const rows = filteredEvents();
-    const pageRows = pageSlice(rows);
-    $("#events-body").innerHTML = pageRows.length ? pageRows.map((event) => {
-      const quota = representativeQuota(event);
-      const scopeTags = asArray(event.scope).slice(0, 2).map((item) => `<span class="tag ${item === "ç»¼åˆ" ? "tag--dark" : ""}">${escapeHtml(item)}</span>`).join("") || '<span class="tag">å…¶ä»–</span>';
-      const instrumentLine = [joinValues(event.underlyings, "", "ã€"), joinValues(event.instruments, "", "ã€")].filter(Boolean).join(" Â· ") || "æœªæŠ«éœ²";
-      const selected = state.selectedEventKey === event.event_key ? " is-selected" : "";
-      return `<tr class="data-row${selected}" tabindex="0" data-event-key="${escapeHtml(event.event_key)}" aria-label="æ‰“å¼€ ${escapeHtml(event.name || "å…¬å¸")} äº‹ä»¶è¯¦æƒ…">
-        <td class="date-cell" data-label="æœ€æ–°æŠ«éœ²"><span class="cell-primary">${escapeHtml(formatDate(event.latest_ann_date, true))}</span><span class="cell-secondary">${escapeHtml(event.anchor_year || "â€”")} å¹´åº¦</span></td>
-        <td class="company-cell" data-label="å…¬å¸"><span class="cell-primary">${escapeHtml(event.name || "æœªå‘½åå…¬å¸")}</span><span class="cell-secondary">${escapeHtml(event.code || "â€”")} Â· ${escapeHtml(event.ind_l1 || "è¡Œä¸šæœªå½•å…¥")}</span></td>
-        <td data-label="ç±»åˆ«"><div class="tag-list">${scopeTags}</div></td>
-        <td data-label="é˜¶æ®µ"><span class="cell-primary">${escapeHtml(event.stage || "å¥—ä¿äº‹ä»¶")}</span><span class="cell-secondary">${escapeHtml(event.approval_level || "å®¡æ‰¹æœªæŠ«éœ²")}</span></td>
-        <td data-label="å“ç§ / å·¥å…·"><span class="cell-primary">${escapeHtml(instrumentLine)}</span><span class="cell-secondary">${escapeHtml(event.venue || "åœºæ‰€æœªæŠ«éœ²")}</span></td>
-        <td class="amount-cell" data-label="é¢åº¦"><span class="cell-primary">${escapeHtml(quota.amount)}</span><span class="cell-secondary">${escapeHtml([quota.basis, quota.extra].filter(Boolean).join(" Â· "))}</span></td>
-        <td data-label="æœŸé™"><span class="cell-primary">${escapeHtml(event.period_text || "æœªæŠ«éœ²")}</span><span class="cell-secondary">${event.is_revolving ? "é¢åº¦å¾ªç¯ä½¿ç”¨" : "éå¾ªç¯æˆ–æœªè¯´æ˜"}</span></td>
-        <td data-label="è¯æ®"><button class="evidence-link" type="button" data-event-key="${escapeHtml(event.event_key)}">${escapeHtml(event.ann_count || 0)} æ¡</button></td>
-      </tr>`;
-    }).join("") : '<tr class="empty-row"><td colspan="8">æ²¡æœ‰åŒ¹é…çš„äº‹ä»¶ï¼Œè¯·è°ƒæ•´æœç´¢æˆ–ç­›é€‰æ¡ä»¶ã€‚</td></tr>';
-    renderResultMeta(rows.length);
-    renderPagination(rows.length);
-    updateSortButtons();
-  }
-
-  function renderAnnouncements() {
-    const rows = filteredAnnouncements();
-    const pageRows = pageSlice(rows);
-    $("#announcements-body").innerHTML = pageRows.length ? pageRows.map((row) => {
-      const scopes = asArray(row.scope).slice(0, 2).map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || '<span class="tag">å…¶ä»–</span>';
-      const evidenceCount = asArray(row.evidence).length;
-      return `<tr class="data-row" tabindex="0" data-ann-id="${escapeHtml(row.ann_id)}" aria-label="æ‰“å¼€ ${escapeHtml(row.title || "å…¬å‘Š")} è¯¦æƒ…">
-        <td class="date-cell" data-label="æŠ«éœ²æ—¥æœŸ"><span class="cell-primary">${escapeHtml(formatDate(row.ann_date))}</span></td>
-        <td class="company-cell" data-label="å…¬å¸"><span class="cell-primary">${escapeHtml(row.name || "æœªå‘½åå…¬å¸")}</span><span class="cell-secondary">${escapeHtml(row.code || "â€”")}</span></td>
-        <td data-label="å…¬å‘Šæ ‡é¢˜"><span class="cell-primary">${escapeHtml(row.title || "æœªå‘½åå…¬å‘Š")}</span><span class="cell-secondary">${escapeHtml(row.summary || "æš‚æ— æ‘˜è¦")}</span></td>
-        <td data-label="è§’è‰²"><span class="cell-primary">${escapeHtml(row.ann_role || "å…¶ä»–")}</span><span class="cell-secondary">${escapeHtml(row.approval_level || "å®¡æ‰¹æœªæŠ«éœ²")}</span></td>
-        <td data-label="ç±»åˆ«"><div class="tag-list">${scopes}</div></td>
-        <td data-label="ç½®ä¿¡åº¦"><span class="cell-primary">${escapeHtml(percent(row.confidence))}</span></td>
-        <td data-label="è¯æ®"><button class="evidence-link" type="button" data-ann-id="${escapeHtml(row.ann_id)}">${evidenceCount} æ¡</button></td>
-      </tr>`;
-    }).join("") : '<tr class="empty-row"><td colspan="7">æ²¡æœ‰åŒ¹é…çš„å…¬å‘Šï¼Œè¯·è°ƒæ•´æœç´¢æˆ–ç­›é€‰æ¡ä»¶ã€‚</td></tr>';
-    renderResultMeta(rows.length);
-    renderPagination(rows.length);
-  }
-
-  function pageSlice(rows) {
-    const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-    if (state.page > totalPages) state.page = totalPages;
-    const start = (state.page - 1) * PAGE_SIZE;
-    return rows.slice(start, start + PAGE_SIZE);
-  }
-
-  function renderResultMeta(total) {
-    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    $("#result-count").textContent = `${total.toLocaleString("zh-CN")} ${state.view === "events" ? "ä¸ªäº‹ä»¶" : "æ¡å…¬å‘Š"}`;
-    $("#page-label").textContent = `ç¬¬ ${state.page} / ${totalPages} é¡µ`;
-  }
-
-  function renderPagination(total) {
-    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    const pagination = $("#pagination");
-    pagination.hidden = total <= PAGE_SIZE;
-    $("#prev-page").disabled = state.page <= 1;
-    $("#next-page").disabled = state.page >= totalPages;
-    if (pagination.hidden) return;
-
-    const pages = paginationWindow(totalPages, state.page);
-    $("#pagination-pages").innerHTML = pages.map((page) => page === "â€¦"
-      ? '<span class="page-ellipsis">â€¦</span>'
-      : `<button class="page-button ${page === state.page ? "is-active" : ""}" type="button" data-page="${page}">${page}</button>`
-    ).join("");
-  }
-
-  function paginationWindow(totalPages, current) {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
-    const pages = new Set([1, totalPages, current - 1, current, current + 1].filter((page) => page >= 1 && page <= totalPages));
-    const ordered = Array.from(pages).sort((a, b) => a - b);
-    const output = [];
-    ordered.forEach((page, index) => {
-      if (index && page - ordered[index - 1] > 1) output.push("â€¦");
-      output.push(page);
-    });
-    return output;
-  }
-
-  function updateSortButtons() {
-    $$(".sort-button").forEach((button) => {
-      const active = button.dataset.sort === state.sortKey;
-      button.classList.toggle("is-active", active);
-      button.dataset.direction = active ? state.sortDirection : "";
-    });
-  }
-
-  function openDrawer(title, subtitle, kicker = "EVENT DETAIL") {
-    state.lastFocusedElement = document.activeElement;
-    $("#drawer-title").textContent = title;
-    $("#drawer-subtitle").textContent = subtitle;
-    $("#drawer-kicker").textContent = kicker;
-    $("#detail-drawer").classList.add("is-open");
-    $("#detail-drawer").setAttribute("aria-hidden", "false");
-    document.body.classList.add("drawer-open");
-    requestAnimationFrame(() => $("[data-close-drawer]").focus());
-  }
-
-  function closeDrawer() {
-    $("#detail-drawer").classList.remove("is-open");
-    $("#detail-drawer").setAttribute("aria-hidden", "true");
-    document.body.classList.remove("drawer-open");
-    state.selectedEventKey = null;
-    if (state.view === "events") renderEvents();
-    if (state.lastFocusedElement?.focus) state.lastFocusedElement.focus();
-  }
-
-  async function openEventDetail(event) {
-    state.selectedEventKey = event.event_key;
-    renderEvents();
-    openDrawer(event.name || "æœªå‘½åå…¬å¸", `${event.code || "â€”"} Â· ${event.anchor_year || "â€”"} Â· ${joinValues(event.scope)}`);
-    $("#drawer-content").innerHTML = renderEventOverview(event) + '<section class="drawer-section"><h3 class="drawer-section-title">å…³è”å…¬å‘Šä¸è¯æ®</h3><div id="event-timeline" class="drawer-loading">æ­£åœ¨è¯»å–å…¬å‘Šè¯æ®â€¦</div></section>';
-    try {
-      const rows = await apiRows("v_ann_flow", {
-        select: ANNOUNCEMENT_FIELDS,
-        event_key: `eq.${event.event_key}`,
-        order: "ann_date.asc,ann_id.asc",
-        limit: "200"
-      });
-      const target = $("#event-timeline");
-      if (target) target.outerHTML = renderTimeline(rows);
-    } catch (error) {
-      const target = $("#event-timeline");
-      if (target) target.innerHTML = `<p class="drawer-empty">å…¬å‘Šè¯æ®è¯»å–å¤±è´¥ï¼š${escapeHtml(error.message)}</p>`;
-    }
-  }
-
-  function renderEventOverview(event) {
-    const quotas = asArray(event.quota);
-    const quotaHtml = quotas.length ? quotas.map((item) => `<article class="quota-item">
-      <div class="quota-item-head"><span>${escapeHtml(item.scope || "ç»¼åˆ")} Â· ${escapeHtml(item.basis || "å£å¾„æœªæŠ«éœ²")}</span><strong>${escapeHtml(formatAmount(item.amount, item.currency))}</strong></div>
-      <p>${escapeHtml(item.raw_text || "æœªä¿ç•™é¢åº¦åŸæ–‡")}</p>
-      <div class="verification"><span class="tag ${item.amount_verified ? "tag--blue" : ""}">é‡‘é¢${item.amount_verified ? "å·²å›éªŒ" : "å¾…å›éªŒ"}</span><span class="tag ${item.quote_verified ? "tag--blue" : ""}">å¼•æ–‡${item.quote_verified ? "å·²å›éªŒ" : "å¾…å›éªŒ"}</span>${item.page ? `<span class="tag">ç¬¬ ${escapeHtml(item.page)} é¡µ</span>` : ""}</div>
-    </article>`).join("") : '<p class="drawer-empty">è¯¥äº‹ä»¶æœªæŠ«éœ²å¯ç»Ÿè®¡é¢åº¦ï¼Œä¸ä»¥ 0 ä»£æ›¿ã€‚</p>';
-
-    return `<section class="drawer-section">
-      <div class="detail-grid">
-        <div class="detail-card"><span>äº‹ä»¶é˜¶æ®µ</span><strong>${escapeHtml(event.stage || "æœªæŠ«éœ²")}</strong></div>
-        <div class="detail-card"><span>å®¡æ‰¹å±‚çº§</span><strong>${escapeHtml(event.approval_level || "æœªæŠ«éœ²")}</strong></div>
-        <div class="detail-card"><span>å…³è”å…¬å‘Š</span><strong>${escapeHtml(event.ann_count || 0)} æ¡</strong></div>
-        <div class="detail-card"><span>æœŸé™</span><strong>${escapeHtml(event.period_text || "æœªæŠ«éœ²")}</strong></div>
-      </div>
-    </section>
-    <section class="drawer-section">
-      <h3 class="drawer-section-title">äº‹ä»¶å­—æ®µ</h3>
-      <div class="detail-line"><span>å·¥å…·</span><strong>${escapeHtml(joinValues(event.instruments))}</strong></div>
-      <div class="detail-line"><span>å“ç§</span><strong>${escapeHtml(joinValues(event.underlyings))}</strong></div>
-      <div class="detail-line"><span>äº¤æ˜“åœºæ‰€</span><strong>${escapeHtml(event.venue || "æœªæŠ«éœ²")}</strong></div>
-      <div class="detail-line"><span>é¢åº¦å¾ªç¯</span><strong>${event.is_revolving === true ? "æ˜¯" : event.is_revolving === false ? "å¦" : "æœªæŠ«éœ²"}</strong></div>
-      <div class="detail-line"><span>è‡ªæœ‰èµ„é‡‘</span><strong>${event.use_own_funds === true ? "æ˜¯" : event.use_own_funds === false ? "å¦" : "æœªæŠ«éœ²"}</strong></div>
-      <div class="detail-line"><span>è¡Œä¸š</span><strong>${escapeHtml([event.ind_l1, event.ind_l2, event.ind_l3].filter(Boolean).join(" / ") || "æœªå½•å…¥")}</strong></div>
-      <div class="detail-line"><span>ä¼ä¸šæ€§è´¨</span><strong>${escapeHtml(event.ent_type || "æœªå½•å…¥")}</strong></div>
-    </section>
-    <section class="drawer-section"><h3 class="drawer-section-title">é¢åº¦ä¸å£å¾„</h3><div class="quota-list">${quotaHtml}</div></section>`;
-  }
-
-  function renderTimeline(rows) {
-    if (!rows.length) return '<div class="timeline"><p class="drawer-empty">å½“å‰äº‹ä»¶æ²¡æœ‰å¯è¯»å–çš„å…³è”å…¬å‘Šã€‚</p></div>';
-    return `<div class="timeline">${rows.map((row) => {
-      const evidence = asArray(row.evidence).slice(0, 3);
-      const evidenceHtml = evidence.map((item) => `<blockquote class="evidence-quote"><small>ç¬¬ ${escapeHtml(item.page || "â€”")} é¡µ Â· ${escapeHtml(item.field || "è¯æ®")}</small>${escapeHtml(item.quote || "æœªæä¾›å¼•æ–‡")}</blockquote>`).join("");
-      const pdf = safeExternalUrl(row.pdf_url);
-      return `<article class="timeline-item">
-        <div class="timeline-meta"><span>${escapeHtml(formatDate(row.ann_date))}</span><span class="tag">${escapeHtml(row.ann_role || "å…¶ä»–")}</span></div>
-        <h4>${escapeHtml(row.title || "æœªå‘½åå…¬å‘Š")}</h4>
-        <p>${escapeHtml(row.summary || "æš‚æ— æ‘˜è¦")}</p>
-        ${evidenceHtml}
-        ${pdf ? `<a class="source-link" href="${escapeHtml(pdf)}" target="_blank" rel="noopener noreferrer">æ‰“å¼€å…¬å‘ŠåŸæ–‡ â†—</a>` : ""}
-      </article>`;
-    }).join("")}</div>`;
-  }
-
-  function openAnnouncementDetail(row) {
-    openDrawer(row.name || "æœªå‘½åå…¬å¸", `${row.code || "â€”"} Â· ${formatDate(row.ann_date)}`, "ANNOUNCEMENT DETAIL");
-    const evidence = asArray(row.evidence);
-    const pdf = safeExternalUrl(row.pdf_url);
-    const evidenceHtml = evidence.length ? evidence.map((item) => `<blockquote class="evidence-quote"><small>ç¬¬ ${escapeHtml(item.page || "â€”")} é¡µ Â· ${escapeHtml(item.field || "è¯æ®")}</small>${escapeHtml(item.quote || "æœªæä¾›å¼•æ–‡")}</blockquote>`).join("") : '<p class="drawer-empty">å½“å‰å…¬å‘Šæ²¡æœ‰å¯å±•ç¤ºçš„è¯æ®å¼•æ–‡ã€‚</p>';
-    $("#drawer-content").innerHTML = `<section class="drawer-section">
-      <div class="detail-grid">
-        <div class="detail-card"><span>å…¬å‘Šè§’è‰²</span><strong>${escapeHtml(row.ann_role || "å…¶ä»–")}</strong></div>
-        <div class="detail-card"><span>å®¡æ‰¹å±‚çº§</span><strong>${escapeHtml(row.approval_level || "æœªæŠ«éœ²")}</strong></div>
-        <div class="detail-card"><span>ç±»åˆ«</span><strong>${escapeHtml(joinValues(row.scope))}</strong></div>
-        <div class="detail-card"><span>ç½®ä¿¡åº¦</span><strong>${escapeHtml(percent(row.confidence))}</strong></div>
-      </div>
-    </section>
-    <section class="drawer-section"><h3 class="drawer-section-title">${escapeHtml(row.title || "å…¬å‘Šæ‘˜è¦")}</h3><p class="drawer-empty">${escapeHtml(row.summary || "æš‚æ— æ‘˜è¦")}</p>${pdf ? `<a class="source-link" href="${escapeHtml(pdf)}" target="_blank" rel="noopener noreferrer">æ‰“å¼€å…¬å‘ŠåŸæ–‡ â†—</a>` : ""}</section>
-    <section class="drawer-section"><h3 class="drawer-section-title">è¯æ®å¼•æ–‡</h3>${evidenceHtml}</section>
-    <section class="drawer-section"><h3 class="drawer-section-title">ç»“æ„åŒ–å­—æ®µ</h3>
-      <div class="detail-line"><span>å·¥å…·</span><strong>${escapeHtml(joinValues(row.instruments))}</strong></div>
-      <div class="detail-line"><span>å“ç§</span><strong>${escapeHtml(joinValues(row.underlyings))}</strong></div>
-      <div class="detail-line"><span>æœŸé™</span><strong>${escapeHtml(row.period_text || "æœªæŠ«éœ²")}</strong></div>
-      <div class="detail-line"><span>è¡Œä¸š</span><strong>${escapeHtml([row.ind_l1, row.ind_l2, row.ind_l3].filter(Boolean).join(" / ") || "æœªå½•å…¥")}</strong></div>
-      <div class="detail-line"><span>ä¼ä¸šæ€§è´¨</span><strong>${escapeHtml(row.ent_type || "æœªå½•å…¥")}</strong></div>
-    </section>`;
-  }
-
-  async function switchView(view) {
-    if (!view || view === state.view) return;
-    state.view = view;
-    state.page = 1;
-    if (view === "announcements") {
-      updateViewChrome();
-      try { await ensureAnnouncements(); } catch (_) { return; }
-    }
-    renderCurrentView();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function clearFilters() {
-    state.query = "";
-    state.scope = "all";
-    state.approval = "all";
-    state.entType = "all";
-    state.page = 1;
-    $("#search-input").value = "";
-    $("#scope-filter").value = "all";
-    $("#approval-filter").value = "all";
-    $("#type-filter").value = "all";
-    renderCurrentView();
-  }
-
-  function csvCell(value) {
-    let text = value === null || value === undefined ? "" : String(value);
-    if (/^[=+\-@]/.test(text)) text = `'${text}`;
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-
-  function quotaExportText(event) {
-    return asArray(event.quota).map((item) => [
-      item.scope || "ç»¼åˆ",
-      item.basis || "å£å¾„æœªæŠ«éœ²",
-      item.currency || "CNY",
-      item.amount ?? "æœªæŠ«éœ²"
-    ].join(" / ")).join("ï¼›");
-  }
-
-  function exportCurrentResults() {
-    const isEvents = state.view === "events";
-    const rows = isEvents ? filteredEvents() : filteredAnnouncements();
-    if (!rows.length) {
-      showToast("å½“å‰ç­›é€‰æ²¡æœ‰å¯å¯¼å‡ºçš„æ•°æ®");
-      return;
-    }
-
-    const headers = isEvents
-      ? ["æœ€æ–°æŠ«éœ²", "å¹´åº¦", "è‚¡ç¥¨ä»£ç ", "å…¬å¸", "ä¸€çº§è¡Œä¸š", "äºŒçº§è¡Œä¸š", "ä¼ä¸šæ€§è´¨", "ç±»åˆ«", "äº‹ä»¶é˜¶æ®µ", "å®¡æ‰¹å±‚çº§", "å·¥å…·", "å“ç§", "äº¤æ˜“åœºæ‰€", "æœŸé™", "é¢åº¦å¾ªç¯", "è‡ªæœ‰èµ„é‡‘", "é¢åº¦æ˜ç»†", "å…³è”å…¬å‘Šæ•°", "äº‹ä»¶é”®"]
-      : ["æŠ«éœ²æ—¥æœŸ", "è‚¡ç¥¨ä»£ç ", "å…¬å¸", "å…¬å‘Šæ ‡é¢˜", "å…¬å‘Šè§’è‰²", "å®¡æ‰¹å±‚çº§", "ç±»åˆ«", "å·¥å…·", "å“ç§", "æœŸé™", "è¡Œä¸š", "ä¼ä¸šæ€§è´¨", "ç½®ä¿¡åº¦", "è¯æ®æ•°", "æ‘˜è¦", "åŸæ–‡é“¾æ¥", "å…¬å‘ŠID"];
-    const body = rows.map((row) => isEvents
-      ? [row.latest_ann_date, row.anchor_year, row.code, row.name, row.ind_l1, row.ind_l2, row.ent_type, joinValues(row.scope, ""), row.stage, row.approval_level, joinValues(row.instruments, ""), joinValues(row.underlyings, ""), row.venue, row.period_text, row.is_revolving === true ? "æ˜¯" : row.is_revolving === false ? "å¦" : "", row.use_own_funds === true ? "æ˜¯" : row.use_own_funds === false ? "å¦" : "", quotaExportText(row), row.ann_count, row.event_key]
-      : [row.ann_date, row.code, row.name, row.title, row.ann_role, row.approval_level, joinValues(row.scope, ""), joinValues(row.instruments, ""), joinValues(row.underlyings, ""), row.period_text, row.ind_l1, row.ent_type, row.confidence, asArray(row.evidence).length, row.summary, row.pdf_url, row.ann_id]
-    );
-    const csv = `\uFEFF${[headers, ...body].map((line) => line.map(csvCell).join(",")).join("\r\n")}`;
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const href = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    link.href = href;
-    link.download = `hedge-${isEvents ? "events" : "announcements"}-filtered-${date}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(href);
-    showToast(`å·²å¯¼å‡º ${rows.length.toLocaleString("zh-CN")} æ¡ç»“æœ`);
-  }
-
-  function bindEvents() {
-    $$('[data-view]').forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
-    $("#search-input").addEventListener("input", (event) => {
-      state.query = event.target.value;
-      state.page = 1;
-      renderCurrentView();
-    });
-    $("#scope-filter").addEventListener("change", (event) => { state.scope = event.target.value; state.page = 1; renderCurrentView(); });
-    $("#approval-filter").addEventListener("change", (event) => { state.approval = event.target.value; state.page = 1; renderCurrentView(); });
-    $("#type-filter").addEventListener("change", (event) => { state.entType = event.target.value; state.page = 1; renderCurrentView(); });
-    $("#clear-filters").addEventListener("click", clearFilters);
-    $("#export-button").addEventListener("click", exportCurrentResults);
-    $("#refresh-button").addEventListener("click", async () => {
-      state.announcements = null;
-      await loadCoreData();
-      showToast("æ•°æ®å·²åˆ·æ–°");
-    });
-
-    $("#events-body").addEventListener("click", (event) => {
-      const row = event.target.closest("[data-event-key]");
-      if (!row) return;
-      const item = state.events.find((candidate) => candidate.event_key === row.dataset.eventKey);
-      if (item) openEventDetail(item);
-    });
-    $("#events-body").addEventListener("keydown", (event) => {
-      if (!["Enter", " "].includes(event.key)) return;
-      const row = event.target.closest("tr[data-event-key]");
-      if (!row) return;
-      event.preventDefault();
-      const item = state.events.find((candidate) => candidate.event_key === row.dataset.eventKey);
-      if (item) openEventDetail(item);
-    });
-    $("#announcements-body").addEventListener("click", (event) => {
-      const row = event.target.closest("[data-ann-id]");
-      if (!row) return;
-      const item = (state.announcements || []).find((candidate) => candidate.ann_id === row.dataset.annId);
-      if (item) openAnnouncementDetail(item);
-    });
-    $("#announcements-body").addEventListener("keydown", (event) => {
-      if (!["Enter", " "].includes(event.key)) return;
-      const row = event.target.closest("tr[data-ann-id]");
-      if (!row) return;
-      event.preventDefault();
-      const item = (state.announcements || []).find((candidate) => candidate.ann_id === row.dataset.annId);
-      if (item) openAnnouncementDetail(item);
-    });
-
-    $$("[data-close-drawer]").forEach((button) => button.addEventListener("click", closeDrawer));
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && $("#detail-drawer").classList.contains("is-open")) closeDrawer();
-    });
-    document.addEventListener("click", (event) => {
-      const sort = event.target.closest(".sort-button");
-      if (sort) {
-        const key = sort.dataset.sort;
-        if (state.sortKey === key) state.sortDirection = state.sortDirection === "desc" ? "asc" : "desc";
-        else { state.sortKey = key; state.sortDirection = key === "company" ? "asc" : "desc"; }
-        state.page = 1;
-        renderEvents();
-      }
-      const page = event.target.closest("[data-page]");
-      if (page) {
-        state.page = Number(page.dataset.page);
-        renderCurrentView();
-        $(".data-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    });
-    $("#prev-page").addEventListener("click", () => { if (state.page > 1) { state.page -= 1; renderCurrentView(); } });
-    $("#next-page").addEventListener("click", () => { state.page += 1; renderCurrentView(); });
-  }
-
-  let toastTimer;
-  function showToast(message) {
-    const toast = $("#toast");
-    toast.textContent = message;
-    toast.classList.add("is-visible");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2200);
-  }
-
-  bindEvents();
-  loadCoreData();
-})();
-
+        right = Number(b.ann_count ||ßnú¶‰ËkºwµçQ•Ñ…¥°¡•Ù•¹Ğ¤ì(€€€ÍÑ…Ñ”¹Í•±•Ñ•‘Ù•¹Ñ-•ä€ô•Ù•¹Ğ¹•Ù•¹Ñ}­•äì(€€€É•¹‘•ÉÙ•¹ÑÌ ¤ì(€€€½Á•¹É…İ•È¡•Ù•¹Ğ¹¹…µ”ñğ€‹šr«–F÷–B7–³–>àˆ°€‘í•Ù•¹Ğ¹½‘”ñğ€‹ŠP‰ôƒ
+Ü€‘í•Ù•¹Ğ¹…¹¡½É}å•…Èñğ€‹ŠP‰ôƒ
+Ü€‘í©½¥¹Y…±Õ•Ì¡•Ù•¹Ğ¹Í½Á”¥õ€¤ì(€€€€ ˆ‘É…İ•Èµ½¹Ñ•¹Ğˆ¤¹¥¹¹•É!Q50€ôÉ•¹‘•ÉÙ•¹Ñ=Ù•ÉÙ¥•Ü¡•Ù•¹Ğ¤€¬€œñÍ•Ñ¥½¸±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸ˆøñ Ì±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸µÑ¥Ñ±”ˆû–Ï¢S–³–F+’â;¢¾š6¸ğ½ Ìøñ‘¥Ø¥ô‰•Ù•¹ĞµÑ¥µ•±¥¹”ˆ±…ÍÌô‰‘É…İ•Èµ±½…‘¥¹œˆûš¶–r£¢¾ï–>[–³–F+¢¾š6»Š˜ğ½‘¥Øøğ½Í•Ñ¥½¸øœì(€€€ÑÉäì(€€€€€½¹ÍĞÉ½İÌ€ô…İ…¥Ğ…Á¥I½İÌ ‰Ù}…¹¹}™±½Üˆ°ì(€€€€€€€Í•±•Ğè99=U959Q}%1L°(€€€€€€€•Ù•¹Ñ}­•äè•Ä¸‘í•Ù•¹Ğ¹•Ù•¹Ñ}­•åõ€°(€€€€€€€½É‘•Èè€‰…¹¹}‘…Ñ”¹…ÍŒ±…¹¹}¥¹…ÍŒˆ°(€€€€€€€±¥µ¥Ğè€ˆÈÀÀˆ(€€€€€ô¤ì(€€€€€½¹ÍĞÑ…É•Ğ€ô€ ˆ•Ù•¹ĞµÑ¥µ•±¥¹”ˆ¤ì(€€€€€¥˜€¡Ñ…É•Ğ¤Ñ…É•Ğ¹½ÕÑ•É!Q50€ôÉ•¹‘•ÉQ¥µ•±¥¹”¡É½İÌ¤ì(€€€ô…Ñ €¡•ÉÉ½È¤ì(€€€€€½¹ÍĞÑ…É•Ğ€ô€ ˆ•Ù•¹ĞµÑ¥µ•±¥¹”ˆ¤ì(€€€€€¥˜€¡Ñ…É•Ğ¤Ñ…É•Ğ¹¥¹¹•É!Q50€ô€ñÀ±…ÍÌô‰‘É…İ•Èµ•µÁÑäˆû–³–F+¢¾š6»¢¾ï–>[–’Ç¢Ò—¾òh‘í•Í…Á•!Ñµ°¡•ÉÉ½È¹µ•ÍÍ…”¥ôğ½Àù€ì(€€€ô(€ô((€™Õ¹Ñ¥½¸É•¹‘•ÉÙ•¹Ñ=Ù•ÉÙ¥•Ü¡•Ù•¹Ğ¤ì(€€€½¹ÍĞÅÕ½Ñ…Ì€ô…ÍÉÉ…ä¡•Ù•¹Ğ¹ÅÕ½Ñ„¤ì(€€€½¹ÍĞÅÕ½Ñ…!Ñµ°€ôÅÕ½Ñ…Ì¹±•¹Ñ €üÅÕ½Ñ…Ì¹µ…À ¡¥Ñ•´¤€ôø€ñ…ÉÑ¥±”±…ÍÌô‰ÅÕ½Ñ„µ¥Ñ•´ˆø(€€€€€€ñ‘¥Ø±…ÍÌô‰ÅÕ½Ñ„µ¥Ñ•´µ¡•…ˆøñÍÁ…¸ø‘í•Í…Á•!Ñµ°¡¥Ñ•´¹Í½Á”ñğ€‹îó–B ˆ¥ôƒ
+Ü€‘í•Í…Á•!Ñµ°¡¥Ñ•´¹‰…Í¥Ìñğ€‹–>–úšr«š*¯¦rÈˆ¥ôğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡™½Éµ…Ñµ½Õ¹Ğ¡¥Ñ•´¹…µ½Õ¹Ğ°¥Ñ•´¹ÕÉÉ•¹ä¤¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñÀø‘í•Í…Á•!Ñµ°¡¥Ñ•´¹É…İ}Ñ•áĞñğ€‹šr«’şwVg¦Šw–ê›–:šZˆ¥ôğ½Àø(€€€€€€ñ‘¥Ø±…ÍÌô‰Ù•É¥™¥…Ñ¥½¸ˆøñÍÁ…¸±…ÍÌô‰Ñ…œ€‘í¥Ñ•´¹…µ½Õ¹Ñ}Ù•É¥™¥•€ü€‰Ñ…œ´µ‰±Õ”ˆ€è€ˆ‰ôˆû¦G¦Št‘í¥Ñ•´¹…µ½Õ¹Ñ}Ù•É¥™¥•€ü€‹–ŞË–n{¦ª0ˆ€è€‹–ú–n{¦ª0‰ôğ½ÍÁ…¸øñÍÁ…¸±…ÍÌô‰Ñ…œ€‘í¥Ñ•´¹ÅÕ½Ñ•}Ù•É¥™¥•€ü€‰Ñ…œ´µ‰±Õ”ˆ€è€ˆ‰ôˆû–òWšZ‘í¥Ñ•´¹ÅÕ½Ñ•}Ù•É¥™¥•€ü€‹–ŞË–n{¦ª0ˆ€è€‹–ú–n{¦ª0‰ôğ½ÍÁ…¸ø‘í¥Ñ•´¹Á…”€ü€ñÍÁ…¸±…ÍÌô‰Ñ…œˆû²°€‘í•Í…Á•!Ñµ°¡¥Ñ•´¹Á…”¥ôƒ¦†Ôğ½ÍÁ…¸ù€€è€ˆ‰ôğ½‘¥Øø(€€€€ğ½…ÉÑ¥±”ù€¤¹©½¥¸ ˆˆ¤€è€œñÀ±…ÍÌô‰‘É…İ•Èµ•µÁÑäˆû¢¾—’ê/’îÛšr«š*¯¦rË–>¿î¢º‡¦Šw–ê›¾ò3’â7’î”€Àƒ’îšnÿğ½Àøœì((€€€É•ÑÕÉ¸€ñÍ•Ñ¥½¸±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸ˆø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µÉ¥ˆø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ…ÉˆøñÍÁ…¸û’ê/’îÛ¦bÛšºÔğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡•Ù•¹Ğ¹ÍÑ…”ñğ€‹šr«š*¯¦rÈˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ…ÉˆøñÍÁ…¸û–º‡š&ç–Æêœğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡•Ù•¹Ğ¹…ÁÁÉ½Ù…±}±•Ù•°ñğ€‹šr«š*¯¦rÈˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ…ÉˆøñÍÁ…¸û–Ï¢S–³–F(ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡•Ù•¹Ğ¹…¹¹}½Õ¹Ğñğ€À¥ôƒšv„ğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ…ÉˆøñÍÁ…¸ûšr¦f@ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡•Ù•¹Ğ¹Á•É¥½‘}Ñ•áĞñğ€‹šr«š*¯¦rÈˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ğ½‘¥Øø(€€€€ğ½Í•Ñ¥½¸ø(€€€€ñÍ•Ñ¥½¸±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸ˆø(€€€€€€ñ Ì±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸µÑ¥Ñ±”ˆû’ê/’îÛ–¶_šºÔğ½ Ìø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û–Ş—–Üğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡©½¥¹Y…±Õ•Ì¡•Ù•¹Ğ¹¥¹ÍÑÉÕµ•¹ÑÌ¤¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û–N4ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡©½¥¹Y…±Õ•Ì¡•Ù•¹Ğ¹Õ¹‘•É±å¥¹Ì¤¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û’ê“šbO–rëš& ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡•Ù•¹Ğ¹Ù•¹Õ”ñğ€‹šr«š*¯¦rÈˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û¦Šw–ê›–ú«:¼ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Ù•¹Ğ¹¥Í}É•Ù½±Ù¥¹œ€ôôôÑÉÕ”€ü€‹šb¼ˆ€è•Ù•¹Ğ¹¥Í}É•Ù½±Ù¥¹œ€ôôô™…±Í”€ü€‹–B˜ˆ€è€‹šr«š*¯¦rÈ‰ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û¢«šr'¢Ö¦Dğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Ù•¹Ğ¹ÕÍ•}½İ¹}™Õ¹‘Ì€ôôôÑÉÕ”€ü€‹šb¼ˆ€è•Ù•¹Ğ¹ÕÍ•}½İ¹}™Õ¹‘Ì€ôôô™…±Í”€ü€‹–B˜ˆ€è€‹šr«š*¯¦rÈ‰ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û¢†3’âhğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡m•Ù•¹Ğ¹¥¹‘}°Ä°•Ù•¹Ğ¹¥¹‘}°È°•Ù•¹Ğ¹¥¹‘}°Ít¹™¥±Ñ•È¡	½½±•…¸¤¹©½¥¸ ˆ€¼€ˆ¤ñğ€‹šr«–öW–”ˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸ûr’îôğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡•Ù•¹Ğ¹ÁÉ½Ù¥¹”ñğ€‹šr«–öW–”ˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û’ò’âkšŸ¢Ò ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡•Ù•¹Ğ¹•¹Ñ}ÑåÁ”ñğ€‹šr«–öW–”ˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€ğ½Í•Ñ¥½¸ø(€€€€ñÍ•Ñ¥½¸±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸ˆøñ Ì±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸µÑ¥Ñ±”ˆû¦Šw–ê›’â;–>–úğ½ Ìøñ‘¥Ø±…ÍÌô‰ÅÕ½Ñ„µ±¥ÍĞˆø‘íÅÕ½Ñ…!Ñµ±ôğ½‘¥Øøğ½Í•Ñ¥½¸ù€ì(€ô((€™Õ¹Ñ¥½¸É•¹‘•ÉQ¥µ•±¥¹”¡É½İÌ¤ì(€€€¥˜€ …É½İÌ¹±•¹Ñ ¤É•ÑÕÉ¸€œñ‘¥Ø±…ÍÌô‰Ñ¥µ•±¥¹”ˆøñÀ±…ÍÌô‰‘É…İ•Èµ•µÁÑäˆû–öO–&7’ê/’îÛšÊ‡šr'–>¿¢¾ï–>[j–Ï¢S–³–F+ğ½Àøğ½‘¥Øøœì(€€€É•ÑÕÉ¸€ñ‘¥Ø±…ÍÌô‰Ñ¥µ•±¥¹”ˆø‘íÉ½İÌ¹µ…À ¡É½Ü¤€ôøì(€€€€€½¹ÍĞ•Ù¥‘•¹”€ô…ÍÉÉ…ä¡É½Ü¹•Ù¥‘•¹”¤¹Í±¥” À°€Ì¤ì(€€€€€½¹ÍĞ•Ù¥‘•¹•!Ñµ°€ô•Ù¥‘•¹”¹µ…À ¡¥Ñ•´¤€ôø€ñ‰±½­ÅÕ½Ñ”±…ÍÌô‰•Ù¥‘•¹”µÅÕ½Ñ”ˆøñÍµ…±°û²°€‘í•Í…Á•!Ñµ°¡¥Ñ•´¹Á…”ñğ€‹ŠPˆ¥ôƒ¦†Ôƒ
+Ü€‘í•Í…Á•!Ñµ°¡¥Ñ•´¹™¥•±ñğ€‹¢¾š6¸ˆ¥ôğ½Íµ…±°ø‘í•Í…Á•!Ñµ°¡¥Ñ•´¹ÅÕ½Ñ”ñğ€‹šr«š>C’úo–òWšZˆ¥ôğ½‰±½­ÅÕ½Ñ”ù€¤¹©½¥¸ ˆˆ¤ì(€€€€€½¹ÍĞÁ‘˜€ôÍ…™•áÑ•É¹…±UÉ°¡É½Ü¹Á‘™}ÕÉ°¤ì(€€€€€É•ÑÕÉ¸€ñ…ÉÑ¥±”±…ÍÌô‰Ñ¥µ•±¥¹”µ¥Ñ•´ˆø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰Ñ¥µ•±¥¹”µµ•Ñ„ˆøñÍÁ…¸ø‘í•Í…Á•!Ñµ°¡™½Éµ…Ñ…Ñ”¡É½Ü¹…¹¹}‘…Ñ”¤¥ôğ½ÍÁ…¸øñÍÁ…¸±…ÍÌô‰Ñ…œˆø‘í•Í…Á•!Ñµ°¡É½Ü¹…¹¹}É½±”ñğ€‹–Û’îXˆ¥ôğ½ÍÁ…¸øğ½‘¥Øø(€€€€€€€€ñ Ğø‘í•Í…Á•!Ñµ°¡É½Ü¹Ñ¥Ñ±”ñğ€‹šr«–F÷–B7–³–F(ˆ¥ôğ½ Ğø(€€€€€€€€ñÀø‘í•Í…Á•!Ñµ°¡É½Ü¹ÍÕµµ…Éäñğ€‹šjš^ƒšFc¢šˆ¥ôğ½Àø(€€€€€€€€‘í•Ù¥‘•¹•!Ñµ±ô(€€€€€€€€‘íÁ‘˜€ü€ñ„±…ÍÌô‰Í½ÕÉ”µ±¥¹¬ˆ¡É•˜ôˆ‘í•Í…Á•!Ñµ°¡Á‘˜¥ôˆÑ…É•Ğô‰}‰±…¹¬ˆÉ•°ô‰¹½½Á•¹•È¹½É•™•ÉÉ•Èˆûš&O–ò–³–F+–:šZƒŠ\ğ½„ù€€è€ˆ‰ô(€€€€€€ğ½…ÉÑ¥±”ù€ì(€€€ô¤¹©½¥¸ ˆˆ¥ôğ½‘¥Øù€ì(€ô((€™Õ¹Ñ¥½¸½Á•¹¹¹½Õ¹•µ•¹Ñ•Ñ…¥°¡É½Ü¤ì(€€€½Á•¹É…İ•È¡É½Ü¹¹…µ”ñğ€‹šr«–F÷–B7–³–>àˆ°€‘íÉ½Ü¹½‘”ñğ€‹ŠP‰ôƒ
+Ü€‘í™½Éµ…Ñ…Ñ”¡É½Ü¹…¹¹}‘…Ñ”¥õ€°€‰99=U959PQ%0ˆ¤ì(€€€½¹ÍĞ•Ù¥‘•¹”€ô…ÍÉÉ…ä¡É½Ü¹•Ù¥‘•¹”¤ì(€€€½¹ÍĞÁ‘˜€ôÍ…™•áÑ•É¹…±UÉ°¡É½Ü¹Á‘™}ÕÉ°¤ì(€€€½¹ÍĞ•Ù¥‘•¹•!Ñµ°€ô•Ù¥‘•¹”¹±•¹Ñ €ü•Ù¥‘•¹”¹µ…À ¡¥Ñ•´¤€ôø€ñ‰±½­ÅÕ½Ñ”±…ÍÌô‰•Ù¥‘•¹”µÅÕ½Ñ”ˆøñÍµ…±°û²°€‘í•Í…Á•!Ñµ°¡¥Ñ•´¹Á…”ñğ€‹ŠPˆ¥ôƒ¦†Ôƒ
+Ü€‘í•Í…Á•!Ñµ°¡¥Ñ•´¹™¥•±ñğ€‹¢¾š6¸ˆ¥ôğ½Íµ…±°ø‘í•Í…Á•!Ñµ°¡¥Ñ•´¹ÅÕ½Ñ”ñğ€‹šr«š>C’úo–òWšZˆ¥ôğ½‰±½­ÅÕ½Ñ”ù€¤¹©½¥¸ ˆˆ¤€è€œñÀ±…ÍÌô‰‘É…İ•Èµ•µÁÑäˆû–öO–&7–³–F+šÊ‡šr'–>¿–ÆW’ëj¢¾š6»–òWšZğ½Àøœì(€€€€ ˆ‘É…İ•Èµ½¹Ñ•¹Ğˆ¤¹¥¹¹•É!Q50€ô€ñÍ•Ñ¥½¸±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸ˆø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µÉ¥ˆø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ…ÉˆøñÍÁ…¸û–³–F+¢K¢&Èğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡É½Ü¹…¹¹}É½±”ñğ€‹–Û’îXˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ…ÉˆøñÍÁ…¸û–º‡š&ç–Æêœğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡É½Ü¹…ÁÁÉ½Ù…±}±•Ù•°ñğ€‹šr«š*¯¦rÈˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ…ÉˆøñÍÁ…¸ûÆï–"¬ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡©½¥¹Y…±Õ•Ì¡É½Ü¹Í½Á”¤¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ…ÉˆøñÍÁ…¸ûö»’ş‡–ê˜ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡Á•É•¹Ğ¡É½Ü¹½¹™¥‘•¹”¤¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ğ½‘¥Øø(€€€€ğ½Í•Ñ¥½¸ø(€€€€ñÍ•Ñ¥½¸±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸ˆøñ Ì±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸µÑ¥Ñ±”ˆø‘í•Í…Á•!Ñµ°¡É½Ü¹Ñ¥Ñ±”ñğ€‹–³–F+šFc¢šˆ¥ôğ½ ÌøñÀ±…ÍÌô‰‘É…İ•Èµ•µÁÑäˆø‘í•Í…Á•!Ñµ°¡É½Ü¹ÍÕµµ…Éäñğ€‹šjš^ƒšFc¢šˆ¥ôğ½Àø‘íÁ‘˜€ü€ñ„±…ÍÌô‰Í½ÕÉ”µ±¥¹¬ˆ¡É•˜ôˆ‘í•Í…Á•!Ñµ°¡Á‘˜¥ôˆÑ…É•Ğô‰}‰±…¹¬ˆÉ•°ô‰¹½½Á•¹•È¹½É•™•ÉÉ•Èˆûš&O–ò–³–F+–:šZƒŠ\ğ½„ù€€è€ˆ‰ôğ½Í•Ñ¥½¸ø(€€€€ñÍ•Ñ¥½¸±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸ˆøñ Ì±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸µÑ¥Ñ±”ˆû¢¾š6»–òWšZğ½ Ìø‘í•Ù¥‘•¹•!Ñµ±ôğ½Í•Ñ¥½¸ø(€€€€ñÍ•Ñ¥½¸±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸ˆøñ Ì±…ÍÌô‰‘É…İ•ÈµÍ•Ñ¥½¸µÑ¥Ñ±”ˆûîOšz–2[–¶_šºÔğ½ Ìø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û–Ş—–Üğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡©½¥¹Y…±Õ•Ì¡É½Ü¹¥¹ÍÑÉÕµ•¹ÑÌ¤¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û–N4ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡©½¥¹Y…±Õ•Ì¡É½Ü¹Õ¹‘•É±å¥¹Ì¤¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸ûšr¦f@ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡É½Ü¹Á•É¥½‘}Ñ•áĞñğ€‹šr«š*¯¦rÈˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û¢†3’âhğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡mÉ½Ü¹¥¹‘}°Ä°É½Ü¹¥¹‘}°È°É½Ü¹¥¹‘}°Ít¹™¥±Ñ•È¡	½½±•…¸¤¹©½¥¸ ˆ€¼€ˆ¤ñğ€‹šr«–öW–”ˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸ûr’îôğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡É½Ü¹ÁÉ½Ù¥¹”ñğ€‹šr«–öW–”ˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÌô‰‘•Ñ…¥°µ±¥¹”ˆøñÍÁ…¸û’ò’âkšŸ¢Ò ğ½ÍÁ…¸øñÍÑÉ½¹œø‘í•Í…Á•!Ñµ°¡É½Ü¹•¹Ñ}ÑåÁ”ñğ€‹šr«–öW–”ˆ¥ôğ½ÍÑÉ½¹œøğ½‘¥Øø(€€€€ğ½Í•Ñ¥½¸ù€ì(€ô((€…Íå¹Œ™Õ¹Ñ¥½¸Íİ¥Ñ¡Y¥•Ü¡Ù¥•Ü¤ì(€€€¥˜€ …Ù¥•ÜñğÙ¥•Ü€ôôôÍÑ…Ñ”¹Ù¥•Ü¤É•ÑÕÉ¸ì(€€€ÍÑ…Ñ”¹Ù¥•Ü€ôÙ¥•Üì(€€€ÍÑ…Ñ”¹Á…”€ô€Äì(€€€¥˜€¡Ù¥•Ü€ôôô€‰…¹¹½Õ¹•µ•¹ÑÌˆ¤ì(€€€€€ÕÁ‘…Ñ•Y¥•İ¡É½µ” ¤ì(€€€€€ÑÉäì…İ…¥Ğ•¹ÍÕÉ•¹¹½Õ¹•µ•¹ÑÌ ¤ìô…Ñ €¡|¤ìÉ•ÑÕÉ¸ìô(€€€ô(€€€É•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ì(€€€İ¥¹‘½Ü¹ÍÉ½±±Q¼¡ìÑ½Àè€À°‰•¡…Ù¥½Èè€‰Íµ½½Ñ ˆô¤ì(€ô((€™Õ¹Ñ¥½¸±•…É¥±Ñ•ÉÌ ¤ì(€€€ÍÑ…Ñ”¹ÅÕ•Éä€ô€ˆˆì(€€€ÍÑ…Ñ”¹Í½Á”€ô€‰…±°ˆì(€€€ÍÑ…Ñ”¹…ÁÁÉ½Ù…°€ô€‰…±°ˆì(€€€ÍÑ…Ñ”¹•¹ÑQåÁ”€ô€‰…±°ˆì(€€€ÍÑ…Ñ”¹Á…”€ô€Äì(€€€€ ˆÍ•…É µ¥¹ÁÕĞˆ¤¹Ù…±Õ”€ô€ˆˆì(€€€€ ˆÍ½Á”µ™¥±Ñ•Èˆ¤¹Ù…±Õ”€ô€‰…±°ˆì(€€€€ ˆ…ÁÁÉ½Ù…°µ™¥±Ñ•Èˆ¤¹Ù…±Õ”€ô€‰…±°ˆì(€€€€ ˆÑåÁ”µ™¥±Ñ•Èˆ¤¹Ù…±Õ”€ô€‰…±°ˆì(€€€É•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ì(€ô((€™Õ¹Ñ¥½¸ÍÙ•±°¡Ù…±Õ”¤ì(€€€±•ĞÑ•áĞ€ôÙ…±Õ”€ôôô¹Õ±°ñğÙ…±Õ”€ôôôÕ¹‘•™¥¹•€ü€ˆˆ€èMÑÉ¥¹œ¡Ù…±Õ”¤ì(€€€¥˜€ ½ylô­pµt¼¹Ñ•ÍĞ¡Ñ•áĞ¤¤Ñ•áĞ€ô€œ‘íÑ•áÑõ€ì(€€€É•ÑÕÉ¸€ˆ‘íÑ•áĞ¹É•Á±…” ¼ˆ½œ°€œˆˆœ¥ô‰€ì(€ô((€™Õ¹Ñ¥½¸ÅÕ½Ñ…áÁ½ÉÑQ•áĞ¡•Ù•¹Ğ¤ì(€€€É•ÑÕÉ¸…ÍÉÉ…ä¡•Ù•¹Ğ¹ÅÕ½Ñ„¤¹µ…À ¡¥Ñ•´¤€ôøl(€€€€€¥Ñ•´¹Í½Á”ñğ€‹îó–B ˆ°(€€€€€¥Ñ•´¹‰…Í¥Ìñğ€‹–>–úšr«š*¯¦rÈˆ°(€€€€€¥Ñ•´¹ÕÉÉ•¹äñğ€‰9dˆ°(€€€€€¥Ñ•´¹…µ½Õ¹Ğ€üü€‹šr«š*¯¦rÈˆ(€€€t¹©½¥¸ ˆ€¼€ˆ¤¤¹©½¥¸ ‹¾òlˆ¤ì(€ô((€™Õ¹Ñ¥½¸•áÁ½ÉÑÕÉÉ•¹ÑI•ÍÕ±ÑÌ ¤ì(€€€½¹ÍĞ¥ÍÙ•¹ÑÌ€ôÍÑ…Ñ”¹Ù¥•Ü€ôôô€‰•Ù•¹ÑÌˆì(€€€½¹ÍĞÉ½İÌ€ô¥ÍÙ•¹ÑÌ€ü™¥±Ñ•É•‘Ù•¹ÑÌ ¤€è™¥±Ñ•É•‘¹¹½Õ¹•µ•¹ÑÌ ¤ì(€€€¥˜€ …É½İÌ¹±•¹Ñ ¤ì(€€€€€Í¡½İQ½…ÍĞ ‹–öO–&7¶o¦'šÊ‡šr'–>¿–¾ó–ëjšVÃš6¸ˆ¤ì(€€€€€É•ÑÕÉ¸ì(€€€ô((€€€½¹ÍĞ¡•…‘•ÉÌ€ô¥ÍÙ•¹ÑÌ(€€€€€€ül‹šršZÃš*¯¦rÈˆ°€‹–æÓ–ê˜ˆ°€‹¢
+‡–£’î‚ˆ°€‹–³–>àˆ°€‹r’îôˆ°€‹’âêŸ¢†3’âhˆ°€‹’ê3êŸ¢†3’âhˆ°€‹’ò’âkšŸ¢Ò ˆ°€‹Æï–"¬ˆ°€‹’ê/’îÛ¦bÛšºÔˆ°€‹–º‡š&ç–Æêœˆ°€‹–Ş—–Üˆ°€‹–N4ˆ°€‹’ê“šbO–rëš& ˆ°€‹šr¦f@ˆ°€‹¦Šw–ê›–ú«:¼ˆ°€‹¢«šr'¢Ö¦Dˆ°€‹¦Šw–ê›šb;îˆ°€‹–Ï¢S–³–F+šVÀˆ°€‹’ê/’îÛ¦R¸‰t(€€€€€€èl‹š*¯¦rËš^—šr|ˆ°€‹¢
+‡–£’î‚ˆ°€‹–³–>àˆ°€‹r’îôˆ°€‹–³–F+š‚¦Š`ˆ°€‹–³–F+¢K¢&Èˆ°€‹–º‡š&ç–Æêœˆ°€‹Æï–"¬ˆ°€‹–Ş—–Üˆ°€‹–N4ˆ°€‹šr¦f@ˆ°€‹¢†3’âhˆ°€‹’ò’âkšŸ¢Ò ˆ°€‹ö»’ş‡–ê˜ˆ°€‹¢¾š6»šVÀˆ°€‹šFc¢šˆ°€‹–:šZ¦Nûš:”ˆ°€‹–³–F)%‰tì(€€€½¹ÍĞ‰½‘ä€ôÉ½İÌ¹µ…À ¡É½Ü¤€ôø¥ÍÙ•¹ÑÌ(€€€€€€ümÉ½Ü¹±…Ñ•ÍÑ}…¹¹}‘…Ñ”°É½Ü¹…¹¡½É}å•…È°É½Ü¹½‘”°É½Ü¹¹…µ”°É½Ü¹ÁÉ½Ù¥¹”°É½Ü¹¥¹‘}°Ä°É½Ü¹¥¹‘}°È°É½Ü¹•¹Ñ}ÑåÁ”°©½¥¹Y…±Õ•Ì¡É½Ü¹Í½Á”°€ˆˆ¤°É½Ü¹ÍÑ…”°É½Ü¹…ÁÁÉ½Ù…±}±•Ù•°°©½¥¹Y…±Õ•Ì¡É½Ü¹¥¹ÍÑÉÕµ•¹ÑÌ°€ˆˆ¤°©½¥¹Y…±Õ•Ì¡É½Ü¹Õ¹‘•É±å¥¹Ì°€ˆˆ¤°É½Ü¹Ù•¹Õ”°É½Ü¹Á•É¥½‘}Ñ•áĞ°É½Ü¹¥Í}É•Ù½±Ù¥¹œ€ôôôÑÉÕ”€ü€‹šb¼ˆ€èÉ½Ü¹¥Í}É•Ù½±Ù¥¹œ€ôôô™…±Í”€ü€‹–B˜ˆ€è€ˆˆ°É½Ü¹ÕÍ•}½İ¹}™Õ¹‘Ì€ôôôÑÉÕ”€ü€‹šb¼ˆ€èÉ½Ü¹ÕÍ•}½İ¹}™Õ¹‘Ì€ôôô™…±Í”€ü€‹–B˜ˆ€è€ˆˆ°ÅÕ½Ñ…áÁ½ÉÑQ•áĞ¡É½Ü¤°É½Ü¹…¹¹}½Õ¹Ğ°É½Ü¹•Ù•¹Ñ}­•åt(€€€€€€èmÉ½Ü¹…¹¹}‘…Ñ”°É½Ü¹½‘”°É½Ü¹¹…µ”°É½Ü¹ÁÉ½Ù¥¹”°É½Ü¹Ñ¥Ñ±”°É½Ü¹…¹¹}É½±”°É½Ü¹…ÁÁÉ½Ù…±}±•Ù•°°©½¥¹Y…±Õ•Ì¡É½Ü¹Í½Á”°€ˆˆ¤°©½¥¹Y…±Õ•Ì¡É½Ü¹¥¹ÍÑÉÕµ•¹ÑÌ°€ˆˆ¤°©½¥¹Y…±Õ•Ì¡É½Ü¹Õ¹‘•É±å¥¹Ì°€ˆˆ¤°É½Ü¹Á•É¥½‘}Ñ•áĞ°É½Ü¹¥¹‘}°Ä°É½Ü¹•¹Ñ}ÑåÁ”°É½Ü¹½¹™¥‘•¹”°…ÍÉÉ…ä¡É½Ü¹•Ù¥‘•¹”¤¹±•¹Ñ °É½Ü¹ÍÕµµ…Éä°É½Ü¹Á‘™}ÕÉ°°É½Ü¹…¹¹}¥‘t(€€€€¤ì(€€€½¹ÍĞÍØ€ôqÕ‘ím¡•…‘•ÉÌ°€¸¸¹‰½‘åt¹µ…À ¡±¥¹”¤€ôø±¥¹”¹µ…À¡ÍÙ•±°¤¹©½¥¸ ˆ°ˆ¤¤¹©½¥¸ ‰qÉq¸ˆ¥õ€ì(€€€½¹ÍĞ‰±½ˆ€ô¹•Ü	±½ˆ¡mÍÙt°ìÑåÁ”è€‰Ñ•áĞ½ÍØí¡…ÉÍ•ĞõÕÑ˜´àˆô¤ì(€€€½¹ÍĞ¡É•˜€ôUI0¹É•…Ñ•=‰©•ÑUI0¡‰±½ˆ¤ì(€€€½¹ÍĞ±¥¹¬€ô‘½Õµ•¹Ğ¹É•…Ñ•±•µ•¹Ğ ‰„ˆ¤ì(€€€½¹ÍĞ‘…Ñ”€ô¹•Ü…Ñ” ¤¹Ñ½%M=MÑÉ¥¹œ ¤¹Í±¥” À°€ÄÀ¤¹É•Á±…” ¼´½œ°€ˆˆ¤ì(€€€±¥¹¬¹¡É•˜€ô¡É•˜ì(€€€±¥¹¬¹‘½İ¹±½…€ô¡•‘”´‘í¥ÍÙ•¹ÑÌ€ü€‰•Ù•¹ÑÌˆ€è€‰…¹¹½Õ¹•µ•¹ÑÌ‰ôµ™¥±Ñ•É•´‘í‘…Ñ•ô¹ÍÙ€ì(€€€‘½Õµ•¹Ğ¹‰½‘ä¹…ÁÁ•¹‘¡¥±¡±¥¹¬¤ì(€€€±¥¹¬¹±¥¬ ¤ì(€€€±¥¹¬¹É•µ½Ù” ¤ì(€€€UI0¹É•Ù½­•=‰©•ÑUI0¡¡É•˜¤ì(€€€Í¡½İQ½…ÍĞ¡ƒ–ŞË–¾ó–è€‘íÉ½İÌ¹±•¹Ñ ¹Ñ½1½…±•MÑÉ¥¹œ ‰é µ8ˆ¥ôƒšv‡îOšzq€¤ì(€ô((€™Õ¹Ñ¥½¸‰¥¹‘Ù•¹ÑÌ ¤ì(€€€€ m‘…Ñ„µÙ¥•İtœ¤¹™½É…  ¡‰ÕÑÑ½¸¤€ôø‰ÕÑÑ½¸¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°€ ¤€ôøÍİ¥Ñ¡Y¥•Ü¡‰ÕÑÑ½¸¹‘…Ñ…Í•Ğ¹Ù¥•Ü¤¤¤ì(€€€€ ˆÍ•…É µ¥¹ÁÕĞˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰¥¹ÁÕĞˆ°€¡•Ù•¹Ğ¤€ôøì(€€€€€ÍÑ…Ñ”¹ÅÕ•Éä€ô•Ù•¹Ğ¹Ñ…É•Ğ¹Ù…±Õ”ì(€€€€€ÍÑ…Ñ”¹Á…”€ô€Äì(€€€€€É•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ì(€€€ô¤ì(€€€€ ˆÍ½Á”µ™¥±Ñ•Èˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰¡…¹”ˆ°€¡•Ù•¹Ğ¤€ôøìÍÑ…Ñ”¹Í½Á”€ô•Ù•¹Ğ¹Ñ…É•Ğ¹Ù…±Õ”ìÍÑ…Ñ”¹Á…”€ô€ÄìÉ•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ìô¤ì(€€€€ ˆ…ÁÁÉ½Ù…°µ™¥±Ñ•Èˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰¡…¹”ˆ°€¡•Ù•¹Ğ¤€ôøìÍÑ…Ñ”¹…ÁÁÉ½Ù…°€ô•Ù•¹Ğ¹Ñ…É•Ğ¹Ù…±Õ”ìÍÑ…Ñ”¹Á…”€ô€ÄìÉ•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ìô¤ì(€€€€ ˆÑåÁ”µ™¥±Ñ•Èˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰¡…¹”ˆ°€¡•Ù•¹Ğ¤€ôøìÍÑ…Ñ”¹•¹ÑQåÁ”€ô•Ù•¹Ğ¹Ñ…É•Ğ¹Ù…±Õ”ìÍÑ…Ñ”¹Á…”€ô€ÄìÉ•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ìô¤ì(€€€€ ˆ‘…Í¡‰½…Éµå•…Èµ™¥±Ñ•Èˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰¡…¹”ˆ°€¡•Ù•¹Ğ¤€ôøìÍÑ…Ñ”¹‘…Í¡‰½…É‘e•…È€ô•Ù•¹Ğ¹Ñ…É•Ğ¹Ù…±Õ”ìÉ•¹‘•É…Í¡‰½…É ¤ìô¤ì(€€€€ ˆ±•…Èµ™¥±Ñ•ÉÌˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°±•…É¥±Ñ•ÉÌ¤ì(€€€€ ˆ•áÁ½ÉĞµ‰ÕÑÑ½¸ˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°•áÁ½ÉÑÕÉÉ•¹ÑI•ÍÕ±ÑÌ¤ì(€€€€ ˆÉ•™É•Í µ‰ÕÑÑ½¸ˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°…Íå¹Œ€ ¤€ôøì(€€€€€ÍÑ…Ñ”¹…¹¹½Õ¹•µ•¹ÑÌ€ô¹Õ±°ì(€€€€€…İ…¥Ğ±½…‘½É•…Ñ„ ¤ì(€€€€€Í¡½İQ½…ÍĞ ‹šVÃš6»–ŞË–"ßšZÀˆ¤ì(€€€ô¤ì((€€€€ ˆ•Ù•¹ÑÌµ‰½‘äˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°€¡•Ù•¹Ğ¤€ôøì(€€€€€½¹ÍĞÉ½Ü€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ ‰m‘…Ñ„µ•Ù•¹Ğµ­•åtˆ¤ì(€€€€€¥˜€ …É½Ü¤É•ÑÕÉ¸ì(€€€€€½¹ÍĞ¥Ñ•´€ôÍÑ…Ñ”¹•Ù•¹ÑÌ¹™¥¹ ¡…¹‘¥‘…Ñ”¤€ôø…¹‘¥‘…Ñ”¹•Ù•¹Ñ}­•ä€ôôôÉ½Ü¹‘…Ñ…Í•Ğ¹•Ù•¹Ñ-•ä¤ì(€€€€€¥˜€¡¥Ñ•´¤½Á•¹Ù•¹Ñ•Ñ…¥°¡¥Ñ•´¤ì(€€€ô¤ì(€€€€ ˆ•Ù•¹ÑÌµ‰½‘äˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰­•å‘½İ¸ˆ°€¡•Ù•¹Ğ¤€ôøì(€€€€€¥˜€ …l‰¹Ñ•Èˆ°€ˆ€‰t¹¥¹±Õ‘•Ì¡•Ù•¹Ğ¹­•ä¤¤É•ÑÕÉ¸ì(€€€€€½¹ÍĞÉ½Ü€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ ‰ÑÉm‘…Ñ„µ•Ù•¹Ğµ­•åtˆ¤ì(€€€€€¥˜€ …É½Ü¤É•ÑÕÉ¸ì(€€€€€•Ù•¹Ğ¹ÁÉ•Ù•¹Ñ•™…Õ±Ğ ¤ì(€€€€€½¹ÍĞ¥Ñ•´€ôÍÑ…Ñ”¹•Ù•¹ÑÌ¹™¥¹ ¡…¹‘¥‘…Ñ”¤€ôø…¹‘¥‘…Ñ”¹•Ù•¹Ñ}­•ä€ôôôÉ½Ü¹‘…Ñ…Í•Ğ¹•Ù•¹Ñ-•ä¤ì(€€€€€¥˜€¡¥Ñ•´¤½Á•¹Ù•¹Ñ•Ñ…¥°¡¥Ñ•´¤ì(€€€ô¤ì(€€€€ ˆ…¹¹½Õ¹•µ•¹ÑÌµ‰½‘äˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°€¡•Ù•¹Ğ¤€ôøì(€€€€€½¹ÍĞÉ½Ü€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ ‰m‘…Ñ„µ…¹¸µ¥‘tˆ¤ì(€€€€€¥˜€ …É½Ü¤É•ÑÕÉ¸ì(€€€€€½¹ÍĞ¥Ñ•´€ô€¡ÍÑ…Ñ”¹…¹¹½Õ¹•µ•¹ÑÌñğmt¤¹™¥¹ ¡…¹‘¥‘…Ñ”¤€ôø…¹‘¥‘…Ñ”¹…¹¹}¥€ôôôÉ½Ü¹‘…Ñ…Í•Ğ¹…¹¹%¤ì(€€€€€¥˜€¡¥Ñ•´¤½Á•¹¹¹½Õ¹•µ•¹Ñ•Ñ…¥°¡¥Ñ•´¤ì(€€€ô¤ì(€€€€ ˆ…¹¹½Õ¹•µ•¹ÑÌµ‰½‘äˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰­•å‘½İ¸ˆ°€¡•Ù•¹Ğ¤€ôøì(€€€€€¥˜€ …l‰¹Ñ•Èˆ°€ˆ€‰t¹¥¹±Õ‘•Ì¡•Ù•¹Ğ¹­•ä¤¤É•ÑÕÉ¸ì(€€€€€½¹ÍĞÉ½Ü€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ ‰ÑÉm‘…Ñ„µ…¹¸µ¥‘tˆ¤ì(€€€€€¥˜€ …É½Ü¤É•ÑÕÉ¸ì(€€€€€•Ù•¹Ğ¹ÁÉ•Ù•¹Ñ•™…Õ±Ğ ¤ì(€€€€€½¹ÍĞ¥Ñ•´€ô€¡ÍÑ…Ñ”¹…¹¹½Õ¹•µ•¹ÑÌñğmt¤¹™¥¹ ¡…¹‘¥‘…Ñ”¤€ôø…¹‘¥‘…Ñ”¹…¹¹}¥€ôôôÉ½Ü¹‘…Ñ…Í•Ğ¹…¹¹%¤ì(€€€€€¥˜€¡¥Ñ•´¤½Á•¹¹¹½Õ¹•µ•¹Ñ•Ñ…¥°¡¥Ñ•´¤ì(€€€ô¤ì((€€€€ ‰m‘…Ñ„µ±½Í”µ‘É…İ•Étˆ¤¹™½É…  ¡‰ÕÑÑ½¸¤€ôø‰ÕÑÑ½¸¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°±½Í•É…İ•È¤¤ì(€€€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰­•å‘½İ¸ˆ°€¡•Ù•¹Ğ¤€ôøì(€€€€€¥˜€¡•Ù•¹Ğ¹­•ä€ôôô€‰Í…Á”ˆ€˜˜€ ˆ‘•Ñ…¥°µ‘É…İ•Èˆ¤¹±…ÍÍ1¥ÍĞ¹½¹Ñ…¥¹Ì ‰¥Ìµ½Á•¸ˆ¤¤±½Í•É…İ•È ¤ì(€€€ô¤ì(€€€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°€¡•Ù•¹Ğ¤€ôøì(€€€€€½¹ÍĞÍ½ÉĞ€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ ˆ¹Í½ÉĞµ‰ÕÑÑ½¸ˆ¤ì(€€€€€¥˜€¡Í½ÉĞ¤ì(€€€€€€€½¹ÍĞ­•ä€ôÍ½ÉĞ¹‘…Ñ…Í•Ğ¹Í½ÉĞì(€€€€€€€¥˜€¡ÍÑ…Ñ”¹Í½ÉÑ-•ä€ôôô­•ä¤ÍÑ…Ñ”¹Í½ÉÑ¥É•Ñ¥½¸€ôÍÑ…Ñ”¹Í½ÉÑ¥É•Ñ¥½¸€ôôô€‰‘•ÍŒˆ€ü€‰…ÍŒˆ€è€‰‘•ÍŒˆì(€€€€€€€•±Í”ìÍÑ…Ñ”¹Í½ÉÑ-•ä€ô­•äìÍÑ…Ñ”¹Í½ÉÑ¥É•Ñ¥½¸€ô­•ä€ôôô€‰½µÁ…¹äˆ€ü€‰…ÍŒˆ€è€‰‘•ÍŒˆìô(€€€€€€€ÍÑ…Ñ”¹Á…”€ô€Äì(€€€€€€€É•¹‘•ÉÙ•¹ÑÌ ¤ì(€€€€€ô(€€€€€½¹ÍĞÁ…”€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ ‰m‘…Ñ„µÁ…•tˆ¤ì(€€€€€¥˜€¡Á…”¤ì(€€€€€€€ÍÑ…Ñ”¹Á…”€ô9Õµ‰•È¡Á…”¹‘…Ñ…Í•Ğ¹Á…”¤ì(€€€€€€€É•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ì(€€€€€€€€ ˆ¹‘…Ñ„µÁ…¹•°ˆ¤¹ÍÉ½±±%¹Ñ½Y¥•Ü¡ì‰•¡…Ù¥½Èè€‰Íµ½½Ñ ˆ°‰±½¬è€‰ÍÑ…ÉĞˆô¤ì(€€€€€ô(€€€ô¤ì(€€€€ ˆÁÉ•ØµÁ…”ˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°€ ¤€ôøì¥˜€¡ÍÑ…Ñ”¹Á…”€ø€Ä¤ìÍÑ…Ñ”¹Á…”€´ô€ÄìÉ•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ìôô¤ì(€€€€ ˆ¹•áĞµÁ…”ˆ¤¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‰±¥¬ˆ°€ ¤€ôøìÍÑ…Ñ”¹Á…”€¬ô€ÄìÉ•¹‘•ÉÕÉÉ•¹ÑY¥•Ü ¤ìô¤ì(€ô((€±•ĞÑ½…ÍÑQ¥µ•Èì(€™Õ¹Ñ¥½¸Í¡½İQ½…ÍĞ¡µ•ÍÍ…”¤ì(€€€½¹ÍĞÑ½…ÍĞ€ô€ ˆÑ½…ÍĞˆ¤ì(€€€Ñ½…ÍĞ¹Ñ•áÑ½¹Ñ•¹Ğ€ôµ•ÍÍ…”ì(€€€Ñ½…ÍĞ¹±…ÍÍ1¥ÍĞ¹…‘ ‰¥ÌµÙ¥Í¥‰±”ˆ¤ì(€€€±•…ÉQ¥µ•½ÕĞ¡Ñ½…ÍÑQ¥µ•È¤ì(€€€Ñ½…ÍÑQ¥µ•È€ôÍ•ÑQ¥µ•½ÕĞ  ¤€ôøÑ½…ÍĞ¹±…ÍÍ1¥ÍĞ¹É•µ½Ù” ‰¥ÌµÙ¥Í¥‰±”ˆ¤°€ÈÈÀÀ¤ì(€ô((€‰¥¹‘Ù•¹ÑÌ ¤ì(€±½…‘½É•…Ñ„ ¤ì)ô¤ ¤ì(

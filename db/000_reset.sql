@@ -13,13 +13,15 @@ drop view if exists public.v_announcements_with_events;
 drop view if exists public.v_ann_flow;
 drop view if exists public.v_events;
 
+drop table if exists public.periodic_metric_items;
+drop table if exists public.periodic_derivatives;
+drop table if exists public.periodic_reports;
 drop table if exists public.event_members;
 drop table if exists public.quota_items;
 drop table if exists public.extraction_evidence;
 drop table if exists public.extractions;
 drop table if exists public.hedge_events;
 drop table if exists public.tips;
-drop table if exists public.annual_reports;
 drop table if exists public.announcements;
 drop table if exists public.companies;
 

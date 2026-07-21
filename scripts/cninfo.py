@@ -23,6 +23,7 @@ from common import CN_TZ, warn
 QUERY_URL = "https://www.cninfo.com.cn/new/hisAnnouncement/query"    # 标题层（POST）
 FULLTEXT_URL = "https://www.cninfo.com.cn/new/fulltextSearch/full"   # 正文层（GET）
 PDF_BASE = "https://static.cninfo.com.cn/"                           # PDF直链 = PDF_BASE + adjunctUrl
+STOCK_LIST_URL = "https://www.cninfo.com.cn/new/data/szse_stock.json"  # 实际覆盖沪深北/B股
 
 SLEEP_RANGE = (1.2, 2.5)       # 页间礼貌限速（秒）
 MAX_PAGES = 300                # 单查询翻页保险上限
@@ -88,7 +89,8 @@ def normalize(ann: dict, source: str) -> dict:
     }
 
 
-def iter_query(searchkey: str = "", category: str = "", se_date: str = "") -> Iterator[dict]:
+def iter_query(searchkey: str = "", category: str = "", se_date: str = "",
+               stock: str = "") -> Iterator[dict]:
     """分页迭代 hisAnnouncement/query。翻页以 hasMore 为准（totalpages 语义不可靠）。
     column=szse 且 plate 留空时，沪深北一起返回。"""
     page = 1
@@ -96,7 +98,7 @@ def iter_query(searchkey: str = "", category: str = "", se_date: str = "") -> It
         payload = {
             "pageNum": page, "pageSize": 30,
             "column": "szse", "tabName": "fulltext",
-            "plate": "", "stock": "",
+            "plate": "", "stock": stock,
             "searchkey": searchkey, "secid": "",
             "category": category, "trade": "",
             "seDate": se_date,
@@ -145,6 +147,13 @@ def download_pdf(pdf_url: str) -> bytes | None:
         except requests.RequestException as e:
             warn(f"PDF 下载异常({attempt}): {repr(e)[:80]}")
     return None
+
+
+def stock_org_map() -> dict[str, str]:
+    """证券代码 → 巨潮 orgId；定向查公告必须传 `code,orgId`。"""
+    data = _request_json("GET", STOCK_LIST_URL)
+    return {str(x.get("code") or "").zfill(6): str(x.get("orgId") or "")
+            for x in (data.get("stockList") or []) if x.get("code") and x.get("orgId")}
 
 
 # ----------------------------- 时间窗切分 -----------------------------
