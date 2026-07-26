@@ -17,7 +17,12 @@ import cninfo
 import prompt_periodic as pp
 from common import ROOT, env, log, sb_delete, sb_insert, sb_select, sb_update, sb_upsert, snapshot_json
 from extract_announcements import call_llm, verify_quote
-from periodic_pdf import locate_pdf
+from periodic_pdf import (
+    TABLE_CONTROLLED_METRICS,
+    extract_derivative_note_metrics,
+    extract_derivative_table_metrics,
+    locate_pdf,
+)
 
 DISCLOSURE = {"有数值", "提及无数值", "未提及", "需复核"}
 SCOPES = {"商品", "外汇", "利率", "其他"}
@@ -35,6 +40,14 @@ HEDGE_ACCOUNTING_STATUS = {"已应用", "未应用", "混合应用", "未明确�
 HEDGE_ACCOUNTING_TYPES = {"公允价值套期", "现金流量套期", "境外经营净投资套期", "其他"}
 ACCOUNTING_ITEM_STATUS = {"已应用", "未应用", "未明确披露", "需复核"}
 FACT_LEVELS = {"report", "scope", "underlying"}
+LEGACY_METRIC_TYPES = ("period_pnl",)
+POLICY_ONLY_ACCOUNTING_MARKERS = (
+    "本公司的套期包括",
+    "本公司套期包括",
+    "本集团的套期主要包括",
+    "套期会计方法包括",
+    "套期分为",
+)
 
 
 def _list(value) -> list[str]:
@@ -149,7 +162,8 @@ def extract_explicit_pnl_metrics(body: str) -> list[dict]:
     )
     for page_match in page_blocks:
         page = int(page_match.group("page"))
-        for match in pnl_pattern.finditer(page_match.group("body")):
+        page_body = page_match.group("body")
+        for match in pnl_pattern.finditer(page_body):
             value = float(
                 match.group("value").replace("−", "-").replace(" ", "").replace(",", "")
             )
@@ -179,6 +193,69 @@ def extract_explicit_pnl_metrics(body: str) -> list[dict]:
                 "raw": match.group("raw"),
                 "page": page,
             })
+        actual_pattern = re.compile(
+            r"(?P<raw>(?P<label>[^，。\n]{0,40}?)"
+            r"报告期内实际损益(?:金额)?为"
+            r"(?P<value>[-−]?\s*[0-9][0-9,]*(?:\.[0-9]+)?)\s*"
+            r"(?P<unit>亿美元|万美元|美元|亿元|万元|千元|元))"
+        )
+        for match in actual_pattern.finditer(page_body):
+            label = match.group("label")
+            if "期货" in label or "商品" in label:
+                scope = "商品"
+            elif any(term in label for term in ("远期", "外汇", "汇率", "货币")):
+                scope = "外汇"
+            elif "利率" in label:
+                scope = "利率"
+            else:
+                scope = None
+            value = float(
+                match.group("value").replace("−", "-").replace(" ", "").replace(",", "")
+            )
+            unit = match.group("unit")
+            metrics.append({
+                "metric_type": "reported_derivative_comprehensive_pnl",
+                "fact_level": "scope" if scope else "report",
+                "scope": scope,
+                "underlying": None,
+                "value": value,
+                "currency": "USD" if "美元" in unit else "CNY",
+                "unit": unit,
+                "time_basis": "period",
+                "source_section": "报告期实际损益情况",
+                "account_name": None,
+                "is_restricted": None,
+                "counterparty": None,
+                "raw": match.group("raw"),
+                "page": page,
+            })
+        section_amount_pattern = re.compile(
+            r"报告期实际损益情况的说明\s*"
+            r"(?P<raw>实际损益(?:金额)?为\s*"
+            r"(?P<value>[-−]?\s*[0-9][0-9,]*(?:\.[0-9]+)?)\s*"
+            r"(?P<unit>亿美元|万美元|美元|亿元|万元|千元|元))"
+        )
+        for match in section_amount_pattern.finditer(page_body):
+            value = float(
+                match.group("value").replace("−", "-").replace(" ", "").replace(",", "")
+            )
+            unit = match.group("unit")
+            metrics.append({
+                "metric_type": "reported_derivative_comprehensive_pnl",
+                "fact_level": "report",
+                "scope": None,
+                "underlying": None,
+                "value": value,
+                "currency": "USD" if "美元" in unit else "CNY",
+                "unit": unit,
+                "time_basis": "period",
+                "source_section": "报告期实际损益情况",
+                "account_name": None,
+                "is_restricted": None,
+                "counterparty": None,
+                "raw": match.group("raw"),
+                "page": page,
+            })
     return metrics
 
 
@@ -192,6 +269,67 @@ def should_replace_metric_family(
         return True
     allowed = set(pp.METRIC_FAMILIES[family])
     return any(item.get("metric_type") in allowed for item in metrics)
+
+
+def should_purge_legacy_metrics(is_full_run: bool) -> bool:
+    return is_full_run
+
+
+def merge_table_metrics(
+    result: dict,
+    table_metrics: list[dict],
+    table_pages: set[int],
+    selected_passes: list[str],
+) -> dict:
+    selected_types = {
+        metric_type
+        for family in selected_passes
+        for metric_type in pp.METRIC_FAMILIES.get(family, ())
+    }
+    merged = dict(result)
+    merged["metrics"] = [
+        item for item in result.get("metrics") or []
+        if not (
+            isinstance(item, dict)
+            and item.get("page") in table_pages
+            and item.get("metric_type") in TABLE_CONTROLLED_METRICS
+        )
+    ]
+    merged["metrics"].extend(
+        item for item in table_metrics
+        if item.get("metric_type") in selected_types
+    )
+    return merged
+
+
+def merge_verified_note_metrics(
+    result: dict,
+    note_metrics: list[dict],
+    selected_passes: list[str],
+) -> dict:
+    selected_types = {
+        metric_type
+        for family in selected_passes
+        for metric_type in pp.METRIC_FAMILIES.get(family, ())
+    }
+    selected_notes = [
+        item for item in note_metrics
+        if item.get("metric_type") in selected_types
+    ]
+    verified_keys = {
+        (item.get("metric_type"), item.get("page"))
+        for item in selected_notes
+    }
+    merged = dict(result)
+    merged["metrics"] = [
+        item for item in result.get("metrics") or []
+        if not (
+            isinstance(item, dict)
+            and (item.get("metric_type"), item.get("page")) in verified_keys
+        )
+    ]
+    merged["metrics"].extend(selected_notes)
+    return merged
 
 
 def load_sample_codes(path: str) -> list[str]:
@@ -213,6 +351,33 @@ def merge_pass_results(profile: dict, metric_results: dict[str, dict]) -> dict:
 
 
 def normalize_accounting_items(result: dict, body: str) -> list[dict]:
+    no_derivative_phrase = next(
+        (
+            phrase for phrase in (
+                "报告期不存在衍生品投资",
+                "报告期内不存在衍生品投资",
+                "本报告期不存在衍生品投资",
+            )
+            if phrase in (body or "")
+        ),
+        None,
+    )
+    if no_derivative_phrase:
+        page, quote = find_page_evidence(body, no_derivative_phrase)
+        return [{
+            "scope": None,
+            "instrument": None,
+            "underlying_asset": None,
+            "application_status": "未应用",
+            "accounting_type": None,
+            "non_application_reason": "报告期不存在衍生品投资",
+            "source_section": "衍生品投资情况",
+            "page": page,
+            "quote": quote,
+            "quote_verified": True,
+            "confidence": 1.0,
+            "need_review": False,
+        }]
     items: list[dict] = []
     for raw_item in result.get("hedge_accounting_items") or []:
         if not isinstance(raw_item, dict):
@@ -221,10 +386,39 @@ def normalize_accounting_items(result: dict, body: str) -> list[dict]:
         status = status if status in ACCOUNTING_ITEM_STATUS else "需复核"
         accounting_type = raw_item.get("accounting_type")
         accounting_type = accounting_type if accounting_type in HEDGE_ACCOUNTING_TYPES else None
+        if status != "已应用":
+            accounting_type = None
         page = raw_item.get("page")
         page = page if isinstance(page, int) and page > 0 else None
         quote = str(raw_item.get("quote") or "")[:240] or None
+        if (
+            quote
+            and any(marker in quote for marker in POLICY_ONLY_ACCOUNTING_MARKERS)
+        ):
+            continue
         quote_verified = verify_quote(quote, body) if quote else None
+        if status == "已应用" and not any(
+            term in (quote or "")
+            for term in (
+                "套期会计",
+                "现金流量套期",
+                "公允价值套期",
+                "套期储备",
+                "指定为套期工具",
+            )
+        ):
+            continue
+        if status == "未应用" and not any(
+            term in (quote or "")
+            for term in (
+                "未应用套期会计",
+                "不适用",
+                "未被指定为套期工具",
+                "不符合套期会计",
+                "不存在衍生品投资",
+            )
+        ):
+            continue
         confidence = raw_item.get("confidence")
         confidence = (
             float(confidence)
@@ -249,7 +443,157 @@ def normalize_accounting_items(result: dict, body: str) -> list[dict]:
             "confidence": confidence,
             "need_review": need_review,
         })
-    return items
+    items = [
+        item for item in items
+        if item["quote_verified"] is True
+    ]
+    checkbox_page, checkbox_quote = find_non_application_checkbox(body)
+    if checkbox_page:
+        verified_unapplied = [
+            item for item in items
+            if item["application_status"] == "未应用"
+            and item["quote_verified"] is True
+        ]
+        if verified_unapplied:
+            return verified_unapplied
+        return [{
+            "scope": None,
+            "instrument": None,
+            "underlying_asset": None,
+            "application_status": "未应用",
+            "accounting_type": None,
+            "non_application_reason": None,
+            "source_section": "套期",
+            "page": checkbox_page,
+            "quote": checkbox_quote,
+            "quote_verified": True,
+            "confidence": 1.0,
+            "need_review": False,
+        }]
+    cash_flow_page, cash_flow_quote = find_page_evidence(
+        body,
+        "现金流量套期储备",
+        require_numeric=True,
+    )
+    if cash_flow_page and not any(
+        item["application_status"] == "已应用"
+        and item["accounting_type"] == "现金流量套期"
+        for item in items
+    ):
+        items.append({
+            "scope": None,
+            "instrument": None,
+            "underlying_asset": None,
+            "application_status": "已应用",
+            "accounting_type": "现金流量套期",
+            "non_application_reason": None,
+            "source_section": "其他综合收益",
+            "page": cash_flow_page,
+            "quote": cash_flow_quote,
+            "quote_verified": True,
+            "confidence": 1.0,
+            "need_review": False,
+        })
+    decisive_scopes = {
+        item["scope"]
+        for item in items
+        if item["application_status"] in {"已应用", "未应用"}
+    }
+    return [
+        item for item in items
+        if not (
+            item["application_status"] == "未明确披露"
+            and item["scope"] in decisive_scopes
+        )
+    ]
+
+
+def find_page_evidence(
+    body: str,
+    term: str,
+    *,
+    require_numeric: bool = False,
+) -> tuple[int | None, str | None]:
+    for match in re.finditer(
+        r"【P(?P<page>\d+)】(?P<body>.*?)(?=【P\d+】|\Z)",
+        body or "",
+        flags=re.S,
+    ):
+        page_body = match.group("body")
+        if term not in page_body:
+            continue
+        numeric_evidence = None
+        if require_numeric:
+            numeric_evidence = re.search(
+                re.escape(term)
+                + (
+                    r"(?:\s+[-+]?(?:"
+                    r"[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?"
+                    r"|[0-9]+\.[0-9]+)){1,8}"
+                ),
+                page_body,
+            )
+            if not numeric_evidence:
+                continue
+        quote = (
+            re.sub(r"\s+", " ", numeric_evidence.group(0)).strip()
+            if numeric_evidence
+            else next(
+                (
+                    line.strip()
+                    for line in page_body.splitlines()
+                    if term in line and line.strip()
+                ),
+                term,
+            )
+        )
+        return int(match.group("page")), quote[:240]
+    return None, None
+
+
+def find_non_application_checkbox(body: str) -> tuple[int | None, str | None]:
+    for match in re.finditer(
+        r"【P(?P<page>\d+)】(?P<body>.*?)(?=【P\d+】|\Z)",
+        body or "",
+        flags=re.S,
+    ):
+        compact = re.sub(r"\s+", "", match.group("body"))
+        evidence = re.search(
+            r"公司开展符合条件套期业务并应用套期会计.{0,30}?不适用",
+            compact,
+        )
+        if evidence:
+            return int(match.group("page")), evidence.group(0)[:240]
+    return None, None
+
+
+def promote_verified_accounting_evidence(
+    top: dict,
+    accounting_items: list[dict],
+) -> None:
+    status_map = {
+        "已应用": "已应用",
+        "未应用": "未应用",
+    }
+    target_status = status_map.get(top.get("hedge_accounting_status"))
+    if not target_status:
+        return
+    verified = next(
+        (
+            item for item in accounting_items
+            if item.get("application_status") == target_status
+            and item.get("quote_verified") is True
+            and item.get("quote")
+        ),
+        None,
+    )
+    if not verified:
+        return
+    top["hedge_accounting_page"] = verified.get("page")
+    top["hedge_accounting_quote"] = verified.get("quote")
+    top["hedge_accounting_quote_verified"] = True
+    if verified.get("non_application_reason"):
+        top["non_application_reason"] = verified["non_application_reason"]
 
 
 def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
@@ -268,6 +612,75 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
     accounting_page = accounting_evidence.get("page")
     accounting_page = accounting_page if isinstance(accounting_page, int) and accounting_page > 0 else None
     accounting_quote = str(accounting_evidence.get("quote") or "")[:240] or None
+    if (
+        accounting_quote
+        and any(marker in accounting_quote for marker in POLICY_ONLY_ACCOUNTING_MARKERS)
+    ):
+        cash_flow_page, cash_flow_quote = find_page_evidence(
+            body,
+            "现金流量套期储备",
+            require_numeric=True,
+        )
+        if cash_flow_page:
+            legacy_accounting = ["现金流量套期"]
+            accounting_types = ["现金流量套期"]
+            accounting_status = "已应用"
+            accounting_page = cash_flow_page
+            accounting_quote = cash_flow_quote
+        else:
+            legacy_accounting = []
+            accounting_types = []
+            accounting_status = "未明确披露"
+            accounting_page = None
+            accounting_quote = None
+    if accounting_status == "已应用" and accounting_types == ["现金流量套期"]:
+        cash_flow_page, cash_flow_quote = find_page_evidence(
+            body,
+            "现金流量套期储备",
+            require_numeric=True,
+        )
+        if cash_flow_page:
+            accounting_page = cash_flow_page
+            accounting_quote = cash_flow_quote
+    no_derivative_phrase = next(
+        (
+            phrase for phrase in (
+                "报告期不存在衍生品投资",
+                "报告期内不存在衍生品投资",
+                "本报告期不存在衍生品投资",
+            )
+            if phrase in (body or "")
+        ),
+        None,
+    )
+    if (
+        status == "未提及"
+        and no_derivative_phrase
+    ):
+        status = "提及无数值"
+    if no_derivative_phrase:
+        no_derivative_page, no_derivative_quote = find_page_evidence(
+            body,
+            no_derivative_phrase,
+        )
+        accounting_status = "未应用"
+        accounting_types = []
+        legacy_accounting = []
+        accounting_page = no_derivative_page
+        accounting_quote = no_derivative_quote
+        if not result.get("non_application_reason"):
+            result = {
+                **result,
+                "non_application_reason": "报告期不存在衍生品投资",
+            }
+    checkbox_page, checkbox_quote = find_non_application_checkbox(body)
+    if checkbox_page:
+        accounting_status = "未应用"
+        accounting_types = []
+        legacy_accounting = []
+        accounting_page = checkbox_page
+        accounting_quote = checkbox_quote
+        result = {**result, "non_application_reason": None}
     top = {
         "disclosure_status": status,
         "scopes": [x for x in _list(result.get("scopes")) if x in SCOPES],
@@ -307,9 +720,23 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
             value_verified = False
         if float(value) == 0 and not value_verified:
             continue
+        if not value_verified:
+            continue
         scope = raw_item.get("scope") if raw_item.get("scope") in SCOPES else None
+        inferred_scope = False
+        if (
+            metric_type == "reported_derivative_comprehensive_pnl"
+            and scope is None
+        ):
+            has_commodity = any(term in quote for term in ("商品", "期货"))
+            has_fx = any(term in quote for term in ("外汇", "汇率", "远期"))
+            if has_commodity != has_fx:
+                scope = "商品" if has_commodity else "外汇"
+                inferred_scope = True
         underlying = raw_item.get("underlying") or None
         fact_level = raw_item.get("fact_level")
+        if inferred_scope and fact_level == "report":
+            fact_level = "scope"
         if fact_level not in FACT_LEVELS:
             fact_level = "underlying" if scope and underlying else ("scope" if scope else "report")
         if fact_level == "report":
@@ -322,6 +749,12 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         if fact_level in {"scope", "underlying"} and not scope:
             fact_level = "report"
             underlying = None
+        quote_verified = (
+            True if raw_item.get("table_cell_verified") is True
+            else verify_quote(quote, body)
+        )
+        if quote_verified is not True:
+            continue
         metrics.append({
             "metric_type": metric_type,
             "fact_level": fact_level,
@@ -339,7 +772,8 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
             "counterparty": raw_item.get("counterparty") or None,
             "raw_text": quote, "page": page,
             "value_verified": value_verified,
-            "quote_verified": verify_quote(quote, body), "value_origin": "reported",
+            "quote_verified": quote_verified,
+            "value_origin": "reported",
         })
     if metrics and top["disclosure_status"] == "提及无数值":
         top["disclosure_status"] = "需复核"
@@ -396,6 +830,21 @@ def main() -> None:
             for family in pp.METRIC_FAMILIES if family in selected_passes
         }
         result = merge_pass_results(profile_result, metric_results)
+        table_metrics, table_pages = extract_derivative_table_metrics(
+            content,
+            located.candidate_pages,
+        )
+        result = merge_table_metrics(
+            result,
+            table_metrics,
+            table_pages,
+            selected_passes,
+        )
+        result = merge_verified_note_metrics(
+            result,
+            extract_derivative_note_metrics(content, located.candidate_pages),
+            selected_passes,
+        )
         if "pnl" in metric_results:
             deterministic = extract_explicit_pnl_metrics(located.marked_text)
             existing = {
@@ -419,12 +868,19 @@ def main() -> None:
             )
         top, metrics = normalize(result, located.marked_text)
         accounting_items = normalize_accounting_items(result, located.marked_text)
+        promote_verified_accounting_evidence(top, accounting_items)
         top["report_id"] = report["report_id"]
         if not args.dry_run:
             if "profile" in selected_passes:
                 sb_upsert("periodic_derivatives", [top], on_conflict="report_id")
                 sb_delete("periodic_hedge_accounting_items",
                           {"report_id": f"eq.{report['report_id']}"})
+            if should_purge_legacy_metrics(is_full_run):
+                legacy_types = ",".join(LEGACY_METRIC_TYPES)
+                sb_delete("periodic_metric_items", {
+                    "report_id": f"eq.{report['report_id']}",
+                    "metric_type": f"in.({legacy_types})",
+                })
             for family in metric_results:
                 if not should_replace_metric_family(is_full_run, family, metrics):
                     log(f"{family} 短批次返回0条，保留数据库中的既有事实")

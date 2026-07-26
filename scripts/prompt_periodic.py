@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """定期报告套保披露结构化提示词。"""
 
-PROMPT_VERSION = "periodic-v2.2-evidence"
+PROMPT_VERSION = "periodic-v2.3-tablecells"
 
 METRIC_FAMILIES = {
     "operations": (
@@ -203,6 +203,8 @@ def build_profile_messages(
   "summary": "不超过100字",
   "confidence": 0.0
 }
+会计政策章节列举可采用的套期类型，不能证明报告期实际应用；只有本期套期项目、
+套期储备、明确勾选或原文明确陈述实际采用时，才能标记“已应用”及具体方法。
 未应用但未解释原因时原因必须为null；不同业务处理不同则报告级为“混合应用”。
 """
     return [
