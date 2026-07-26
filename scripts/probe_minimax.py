@@ -37,10 +37,10 @@ def main() -> int:
         )
         latency = time.time() - t0
         content = (resp.choices[0].message.content or "").strip()[:50]
-        log(f"✅ 可达。往返 {latency:.1f}s | 返回: {content!r} | usage: {resp.usage}")
+        log(f"[OK] 可达。往返 {latency:.1f}s | 返回: {content!r} | usage: {resp.usage}")
         return 0
     except Exception as e:
-        log(f"❌ 探活失败: {repr(e)[:300]}")
+        log(f"[FAIL] 探活失败: {repr(e)[:300]}")
         log("结论：MiniMax 从 Actions 不可达或密钥无效 → 抽取需降级为本地执行，"
             "或换 LLM_BASE_URL 指向可达的兼容厂商。请把上面的报错原样贴回会话。")
         return 1

@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="计划与实际工作区本地结构演示" />
+    <title>Hedge Monitor · 计划与实际 Demo</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="data.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <a class="brand" href="#top">
+          <span class="brand-mark">H</span>
+          <span class="brand-copy"><strong>HEDGE MONITOR</strong><small>套期保值数据</small></span>
+        </a>
+
+        <div class="sidebar-label">工作区</div>
+        <nav class="side-nav">
+          <a class="side-link" href="#"><span>数据看板</span><small>概览</small></a>
+          <a class="side-link" href="#"><span>套保事件</span><small>5,407</small></a>
+          <a class="side-link" href="#"><span>公告原流</span><small>12,213</small></a>
+          <a class="side-link is-active" href="#top" data-workspace="actuals" aria-current="page">
+            <span>计划与实际</span><small>Demo</small>
+          </a>
+        </nav>
+
+        <div class="sidebar-note">
+          <span class="status-dot"></span>
+          <div><strong>本地演示数据</strong><small>未接入正式数据</small></div>
+        </div>
+      </aside>
+
+      <div class="main-column">
+        <header class="topbar">
+          <div class="breadcrumb"><strong>套保监控</strong><span>/</span><span>计划与实际</span></div>
+          <span class="demo-badge">结构预览 · 固定样例</span>
+        </header>
+
+        <main id="top" class="main-content">
+          <section class="page-heading">
+            <div>
+              <h1>计划与实际</h1>
+              <p>公告授权、定期报告实际、套期会计与证据核对</p>
+            </div>
+            <button class="button button--secondary" type="button" id="reset-filters">清除筛选</button>
+          </section>
+
+          <section class="summary-strip" aria-label="样例数据概览">
+            <article><span>样例记录</span><strong id="metric-rows">—</strong><small>公司 × 报告期 × 类别</small></article>
+            <article><span>覆盖公司</span><strong id="metric-companies">—</strong><small>固定演示样本</small></article>
+            <article><span>双回验通过</span><strong id="metric-verified">—</strong><small>关键数值与引文</small></article>
+            <article><span>应用套期会计</span><strong id="metric-accounting">—</strong><small>含混合应用</small></article>
+          </section>
+
+          <section class="data-panel">
+            <div class="filters">
+              <label class="search-field">
+                <span>搜索</span>
+                <input id="search-input" type="search" placeholder="公司、代码、品种或工具" autocomplete="off" />
+              </label>
+              <label>
+                <span>报告期</span>
+                <select id="period-filter"><option value="all">全部报告期</option></select>
+              </label>
+              <label>
+                <span>类别</span>
+                <select id="category-filter">
+                  <option value="all">全部类别</option>
+                  <option value="商品">商品</option>
+                  <option value="外汇">外汇</option>
+                  <option value="利率">利率</option>
+                </select>
+              </label>
+              <label>
+                <span>套期会计</span>
+                <select id="accounting-filter">
+                  <option value="all">全部状态</option>
+                  <option value="已应用">已应用</option>
+                  <option value="未应用">未应用</option>
+                  <option value="混合应用">混合应用</option>
+                  <option value="未明确披露">未明确披露</option>
+                  <option value="需复核">需复核</option>
+                </select>
+              </label>
+              <label>
+                <span>核对状态</span>
+                <select id="match-filter">
+                  <option value="all">全部状态</option>
+                  <option value="匹配">匹配</option>
+                  <option value="部分匹配">部分匹配</option>
+                  <option value="口径不可比">口径不可比</option>
+                  <option value="仅有计划">仅有计划</option>
+                  <option value="仅有实际">仅有实际</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="table-toolbar">
+              <div>
+                <strong>定期报告实际情况</strong>
+                <span>仅演示页面结构与信息层级</span>
+              </div>
+              <div><strong id="result-count">—</strong><span> 条结果</span></div>
+            </div>
+
+            <div class="table-scroll">
+              <table class="actuals-table">
+                <thead>
+                  <tr class="heading-row">
+                    <th>报告期</th>
+                    <th>公司</th>
+                    <th>类别 / 品种</th>
+                    <th>公告计划额度</th>
+                    <th>实际交易流量</th>
+                    <th>期末保证金</th>
+                    <th>衍生金融资产</th>
+                    <th>衍生金融负债</th>
+                    <th>公允价值净额</th>
+                    <th>衍生品综合损益</th>
+                    <th>处置投资收益</th>
+                    <th>公允价值变动损益</th>
+                    <th>套期会计</th>
+                    <th>方法</th>
+                    <th>核对状态</th>
+                    <th>证据</th>
+                  </tr>
+                  <tr class="column-filter-row">
+                    <th><select id="column-period-filter" aria-label="按报告期筛选"><option value="all">全部</option></select></th>
+                    <th><select id="column-company-filter" aria-label="按公司筛选"><option value="all">全部</option></select></th>
+                    <th><select id="column-underlying-filter" aria-label="按类别品种筛选"><option value="all">全部</option></select></th>
+                    <th><select id="column-plan-basis-filter" aria-label="按计划额度口径筛选"><option value="all">全部</option></select></th>
+                    <th>
+                      <select id="column-flow-filter" aria-label="按交易流量披露状态筛选">
+                        <option value="all">全部</option>
+                        <option value="reported">已披露</option>
+                        <option value="missing">未披露</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-margin-filter" aria-label="按期末保证金筛选">
+                        <option value="all">全部</option>
+                        <option value="positive">已披露</option>
+                        <option value="missing">未披露</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-asset-filter" aria-label="按衍生金融资产筛选">
+                        <option value="all">全部</option>
+                        <option value="positive">正值</option>
+                        <option value="zero">零</option>
+                        <option value="missing">分类未披露</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-liability-filter" aria-label="按衍生金融负债筛选">
+                        <option value="all">全部</option>
+                        <option value="positive">正值</option>
+                        <option value="zero">零</option>
+                        <option value="missing">分类未披露</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-net-filter" aria-label="按期末净额筛选">
+                        <option value="all">全部</option>
+                        <option value="positive">正值</option>
+                        <option value="negative">负值</option>
+                        <option value="missing">未披露</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-pnl-filter" aria-label="按综合损益筛选">
+                        <option value="all">全部</option>
+                        <option value="positive">盈利</option>
+                        <option value="negative">亏损</option>
+                        <option value="missing">未披露</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-disposal-filter" aria-label="按处置投资收益筛选">
+                        <option value="all">全部</option>
+                        <option value="positive">正值</option>
+                        <option value="negative">负值</option>
+                        <option value="missing">分类未披露</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-fv-filter" aria-label="按公允价值变动损益筛选">
+                        <option value="all">全部</option>
+                        <option value="positive">正值</option>
+                        <option value="negative">负值</option>
+                        <option value="missing">分类未披露</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-accounting-filter" aria-label="按套期会计状态筛选">
+                        <option value="all">全部</option>
+                        <option value="已应用">已应用</option>
+                        <option value="未应用">未应用</option>
+                        <option value="混合应用">混合应用</option>
+                        <option value="未明确披露">未明确</option>
+                        <option value="需复核">需复核</option>
+                      </select>
+                    </th>
+                    <th><select id="column-method-filter" aria-label="按套期会计方法筛选"><option value="all">全部</option></select></th>
+                    <th>
+                      <select id="column-match-filter" aria-label="按核对状态筛选">
+                        <option value="all">全部</option>
+                        <option value="匹配">匹配</option>
+                        <option value="部分匹配">部分匹配</option>
+                        <option value="口径不可比">不可比</option>
+                        <option value="仅有计划">仅计划</option>
+                        <option value="仅有实际">仅实际</option>
+                      </select>
+                    </th>
+                    <th>
+                      <select id="column-evidence-filter" aria-label="按证据完整度筛选">
+                        <option value="all">全部</option>
+                        <option value="complete">完整</option>
+                        <option value="partial">部分</option>
+                      </select>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody id="actuals-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="empty-state" hidden>
+              <strong>没有符合条件的样例</strong>
+              <span>调整筛选条件后再试。</span>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="drawer-overlay" id="drawer-overlay" hidden></div>
+    <aside class="detail-drawer" id="detail-drawer" aria-hidden="true" aria-label="计划与实际详情">
+      <header class="drawer-header">
+        <div>
+          <span>研究详情</span>
+          <h2 id="drawer-title">—</h2>
+        </div>
+        <button class="icon-button" id="drawer-close" type="button" aria-label="关闭详情">×</button>
+      </header>
+      <div class="drawer-content" id="drawer-content"></div>
+    </aside>
+  </body>
+</html>

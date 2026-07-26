@@ -1,7 +1,7 @@
 # schema_snapshot.md —— 数据契约（人读版）
 
 > 与 db/001_init.sql 同步维护；表结构变更的会话结束时必须更新本文件。
-> 快照版本：003（2026-07-20，增加 M4a 定期报告 POC）
+> 快照版本：004（2026-07-26，升级 M4a v1.5 数值与套期会计契约）
 
 ## 层次关系
 
@@ -12,6 +12,7 @@ companies ──(code)── announcements ──1:1── extractions ──1:N
 
 companies ──(code)── periodic_reports ──1:1── periodic_derivatives
                               └──────────1:N── periodic_metric_items
+                              └──────────1:N── periodic_hedge_accounting_items
 ```
 
 ## periodic_reports（定期报告元数据与处理状态）
@@ -25,7 +26,9 @@ needs_ocr / failed / skipped。候选页为 PDF 1-based 页码，连同定位词
 
 一份报告一行。`disclosure_status` 是一等公民：有数值 / 提及无数值 / 未提及 / 需复核。
 保存 scope、工具、品种、目的、套期会计类型、证据、模型和提示词版本；`review_status`
-默认 pending，机器抽取不能自动等同于人工接受。
+默认 pending，机器抽取不能自动等同于人工接受。v1.5 增加
+`hedge_accounting_status`（已应用 / 未应用 / 混合应用 / 未明确披露 / 需复核）、
+`hedge_accounting_types`、未应用原因及页码/引文/引文回验。旧 `hedge_accounting` 数组保留兼容。
 
 ## periodic_metric_items（逐项原文数值事实）
 
@@ -33,6 +36,18 @@ needs_ocr / failed / skipped。候选页为 PDF 1-based 页码，连同定位词
 时间口径（period / period_end / period_peak）、来源章节、原文摘录和页码。`value_origin`
 数据库约束固定为 reported，估算值无法写入主事实表。`value_verified` 只证明数字可从摘录
 复算；`quote_verified` 证明摘录可在候选正文定位。可信统计必须两者同时为 true。
+
+`fact_level` 明确事实归属：`report` 要求 scope/underlying 均为空，`scope` 要求仅 scope，
+`underlying` 要求 scope 和 underlying 同时存在。新增综合损益、处置投资收益、公允价值
+变动损益和公允价值净额的明确指标类型；旧 `period_pnl` 只为历史兼容，不再由 v2.0 提示词
+生成。保证金事实额外保存 `account_name`、`is_restricted`、`counterparty`，避免重复计数和
+错误比较。
+
+## periodic_hedge_accounting_items（套期会计业务级事实）
+
+一份报告可按业务范围、工具或品种保存多条套期会计事实。记录应用状态、会计方法、未应用
+原因、来源章节、页码、引文、引文回验、置信度和复核标记。报告级摘要仍保存在
+`periodic_derivatives`，本表不进入公司维表。
 
 公告额度核验等级由 `scripts/periodic_verification.py` 决定：期间最高同口径=A、仅期末快照=B、
 存在相关但不同口径事实=C、无可用事实=D。期间买卖额、公允价值和损益不直接与授权额度比较。
@@ -124,7 +139,7 @@ event_members：ann_id PK → event_key。整层由 `build_events.py` 全量重�
 
 ## RLS
 
-9 张表全部启用 RLS；anon/authenticated 仅 select；写入只经 service_role（绕过 RLS）。
+定期报告新增表同样启用 RLS；anon/authenticated 仅 select；写入只经 service_role（绕过 RLS）。
 新表显式 `GRANT SELECT` 给前端角色、显式授予 service_role 写权限，以兼容 Supabase 2026
 年开始推行的“新表默认不暴露 Data API”行为。两个前端视图均为 security_invoker。
 

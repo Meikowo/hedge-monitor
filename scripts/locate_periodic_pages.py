@@ -29,6 +29,7 @@ def main() -> None:
     ap.add_argument("--report-id", action="append")
     ap.add_argument("--write", action="store_true")
     args = ap.parse_args()
+    terms = load_terms(args.sample)
     params = {
         "select": "report_id,code,name,title,pdf_url,status",
         "order": "publish_date.desc", "limit": str(args.limit),
@@ -37,8 +38,8 @@ def main() -> None:
         params["report_id"] = f"in.({','.join(args.report_id)})"
     else:
         params["status"] = "in.(discovered,failed)"
+        params["code"] = f"in.({','.join(terms)})"
     reports = sb_select("periodic_reports", params)
-    terms = load_terms(args.sample)
     summary = []
     OUTPUT_DIR.mkdir(exist_ok=True)
     for i, report in enumerate(reports, 1):
@@ -74,4 +75,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

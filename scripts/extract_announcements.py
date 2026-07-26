@@ -117,6 +117,11 @@ def extract_json_obj(raw: str) -> dict:
     raise ValueError(f"JSON括号不配对。前300字: {raw[:300]}")
 
 
+def thinking_extra_body(setting: str | None) -> dict:
+    kind = "adaptive" if str(setting).lower() == "on" else "disabled"
+    return {"thinking": {"type": kind}}
+
+
 def call_llm(messages: list[dict]) -> dict:
     """MiniMax-M3（OpenAI兼容）。thinking 保持 adaptive，思考内容由解析层剥离。"""
     from openai import OpenAI
@@ -125,8 +130,7 @@ def call_llm(messages: list[dict]) -> dict:
     kwargs = dict(model=env("LLM_MODEL", "MiniMax-M3"), messages=messages,
                   temperature=float(env("LLM_TEMPERATURE", "1.0")),
                   max_tokens=int(env("LLM_MAX_TOKENS", "8000")))
-    if env("LLM_THINKING", "on").lower() == "on":
-        kwargs["extra_body"] = {"thinking": {"type": "adaptive"}}
+    kwargs["extra_body"] = thinking_extra_body(env("LLM_THINKING", "on"))
     last = None
     for backoff in (0, 10, 40):
         if backoff:
@@ -134,7 +138,34 @@ def call_llm(messages: list[dict]) -> dict:
             time.sleep(backoff)
         try:
             resp = client.chat.completions.create(**kwargs)
-            return extract_json_obj(resp.choices[0].message.content or "")
+            choice = resp.choices[0]
+            content = choice.message.content or ""
+            if not content.strip():
+                payload = resp.model_dump()
+                message = payload.get("choices", [{}])[0].get("message", {})
+                usage = payload.get("usage") or {}
+                diagnostics = {
+                    "finish_reason": payload.get("choices", [{}])[0].get("finish_reason"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "reasoning_tokens": (
+                        (usage.get("completion_tokens_details") or {})
+                        .get("reasoning_tokens")
+                    ),
+                    "output_sensitive": payload.get("output_sensitive"),
+                    "output_sensitive_type": payload.get("output_sensitive_type"),
+                    "base_status": (payload.get("base_resp") or {}).get("status_code"),
+                    "message_fields": sorted(
+                        key for key, value in message.items() if value not in (None, "", [])
+                    ),
+                }
+                raise RuntimeError(f"LLM 返回空正文: {diagnostics}")
+            return extract_json_obj(content)
+        except ValueError as e:
+            raise RuntimeError(f"LLM JSON 不完整，停止同请求重试: {e}") from e
+        except RuntimeError as e:
+            if str(e).startswith("LLM 返回空正文"):
+                raise
+            last = e
         except Exception as e:
             last = e
     raise RuntimeError(f"LLM 调用最终失败: {repr(last)[:200]}")
@@ -354,4 +385,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
