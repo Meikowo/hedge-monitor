@@ -291,6 +291,7 @@ class PeriodicValidationBatchTest(unittest.TestCase):
         self.assertEqual(dispatch["inputs"]["sample_set"]["default"], "validation6")
 
         job = workflow["jobs"]["periodic-poc"]
+        self.assertEqual(job["env"]["LLM_THINKING"], "off")
         sample_expression = job["env"]["SAMPLE_FILE"]
         self.assertIn("config/annual_validation_2025.csv", sample_expression)
         self.assertIn("config/annual_poc_2025.csv", sample_expression)

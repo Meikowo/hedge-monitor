@@ -35,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
+      LLM_THINKING: 'off'
       SAMPLE_FILE: ${{ inputs.sample_set == 'validation6' && 'config/annual_validation_2025.csv' || 'config/annual_poc_2025.csv' }}
     steps:
       - uses: actions/checkout@v5
