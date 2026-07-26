@@ -67,6 +67,133 @@ def verify_raw_value(value: float, raw: str) -> bool:
     return False
 
 
+def zero_literal_matches_unit(unit: str, raw: str) -> bool:
+    """防止把同一行的 0.00% 错配为金额 0。"""
+    matches = list(re.finditer(
+        r"(?<![0-9.,])[-+]?0(?:\.0+)?(?![0-9.,])",
+        raw or "",
+    ))
+    if not matches:
+        return False
+    percentage_matches = [
+        match for match in matches
+        if (raw or "")[match.end():].lstrip().startswith("%")
+    ]
+    if unit == "%":
+        return bool(percentage_matches)
+    return len(percentage_matches) < len(matches)
+
+
+SCALED_UNITS = {
+    "千元": ("元", 1_000),
+    "万元": ("元", 10_000),
+    "亿元": ("元", 100_000_000),
+    "万美元": ("美元", 10_000),
+    "亿美元": ("美元", 100_000_000),
+}
+
+
+def restore_literal_scale(value: float, unit: str | None, raw: str) -> tuple[float, str]:
+    """模型若擅自换算为基础单位，则恢复原文数值及原文单位。"""
+    current_value = float(value)
+    current_unit = unit or "其他"
+    matches = [
+        match for match in re.finditer(
+        r"([-+]?[0-9][0-9,]*(?:\.[0-9]+)?)\s*(千元|万元|亿元|万美元|亿美元)",
+        raw or "",
+        )
+        if SCALED_UNITS[match.group(2)][0] == current_unit
+    ]
+    for match in matches:
+        literal = float(match.group(1).replace(",", ""))
+        literal_unit = match.group(2)
+        base_unit, scale = SCALED_UNITS[literal_unit]
+        converted = literal * scale
+        tolerance = max(1e-8, abs(current_value) * 1e-8)
+        if abs(abs(converted) - abs(current_value)) <= tolerance:
+            restored = -abs(literal) if current_value < 0 else literal
+            return restored, literal_unit
+    if len(matches) == 1:
+        match = matches[0]
+        literal = float(match.group(1).replace(",", ""))
+        restored = -abs(literal) if current_value < 0 else literal
+        return restored, match.group(2)
+    return current_value, current_unit
+
+
+def normalize_metric_type(metric_type: str, quote: str) -> str:
+    """用原文纠正容易混淆的峰值口径。"""
+    if (
+        metric_type == "notional_peak_reported"
+        and "保证金" in quote
+        and any(term in quote for term in ("最高", "最大", "任意时点"))
+    ):
+        return "margin_peak_reported"
+    return metric_type
+
+
+def extract_explicit_pnl_metrics(body: str) -> list[dict]:
+    """兜底提取“报告期实际损益情况”中的明确平仓与持仓损益合计。"""
+    metrics: list[dict] = []
+    page_blocks = re.finditer(
+        r"【P(?P<page>\d+)】(?P<body>.*?)(?=【P\d+】|\Z)",
+        body or "",
+        flags=re.S,
+    )
+    pnl_pattern = re.compile(
+        r"(?P<raw>(?:计入报告期内的)?"
+        r"(?P<label>[^。\n]{0,60}?(?:平仓与持仓损益|持仓与平仓损益))"
+        r"(?:合计)?(?:为|：|:)\s*"
+        r"(?P<value>[-−]?\s*[0-9][0-9,]*(?:\.[0-9]+)?)\s*"
+        r"(?P<unit>亿美元|万美元|美元|亿元|万元|千元|元))"
+    )
+    for page_match in page_blocks:
+        page = int(page_match.group("page"))
+        for match in pnl_pattern.finditer(page_match.group("body")):
+            value = float(
+                match.group("value").replace("−", "-").replace(" ", "").replace(",", "")
+            )
+            unit = match.group("unit")
+            label = match.group("label")
+            if "商品" in label:
+                scope = "商品"
+            elif "外汇" in label or "汇率" in label:
+                scope = "外汇"
+            elif "利率" in label:
+                scope = "利率"
+            else:
+                scope = None
+            metrics.append({
+                "metric_type": "reported_derivative_comprehensive_pnl",
+                "fact_level": "scope" if scope else "report",
+                "scope": scope,
+                "underlying": None,
+                "value": value,
+                "currency": "USD" if "美元" in unit else "CNY",
+                "unit": unit,
+                "time_basis": "period",
+                "source_section": "报告期实际损益情况",
+                "account_name": None,
+                "is_restricted": None,
+                "counterparty": None,
+                "raw": match.group("raw"),
+                "page": page,
+            })
+    return metrics
+
+
+def should_replace_metric_family(
+    is_full_run: bool,
+    family: str,
+    metrics: list[dict],
+) -> bool:
+    """完整运行可确认空结果；选择性短批次空结果默认保留旧事实。"""
+    if is_full_run:
+        return True
+    allowed = set(pp.METRIC_FAMILIES[family])
+    return any(item.get("metric_type") in allowed for item in metrics)
+
+
 def load_sample_codes(path: str) -> list[str]:
     with open(path, newline="", encoding="utf-8-sig") as f:
         return [row["code"].zfill(6) for row in csv.DictReader(f)]
@@ -164,14 +291,20 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
     }
     metrics: list[dict] = []
     for raw_item in result.get("metrics") or []:
-        if not isinstance(raw_item, dict) or raw_item.get("metric_type") not in METRICS:
+        if not isinstance(raw_item, dict):
             continue
         value = raw_item.get("value")
         page = raw_item.get("page")
         quote = str(raw_item.get("raw") or "")[:240]
         if not isinstance(value, (int, float)) or not isinstance(page, int) or page <= 0 or not quote:
             continue
+        metric_type = normalize_metric_type(str(raw_item.get("metric_type") or ""), quote)
+        if metric_type not in METRICS:
+            continue
+        value, unit = restore_literal_scale(value, raw_item.get("unit"), quote)
         value_verified = verify_raw_value(value, quote)
+        if float(value) == 0 and not zero_literal_matches_unit(unit, quote):
+            value_verified = False
         if float(value) == 0 and not value_verified:
             continue
         scope = raw_item.get("scope") if raw_item.get("scope") in SCOPES else None
@@ -190,12 +323,12 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
             fact_level = "report"
             underlying = None
         metrics.append({
-            "metric_type": raw_item["metric_type"],
+            "metric_type": metric_type,
             "fact_level": fact_level,
             "scope": scope,
             "underlying": underlying,
             "value": float(value), "currency": raw_item.get("currency") or None,
-            "unit": raw_item.get("unit") or "其他",
+            "unit": unit,
             "time_basis": raw_item.get("time_basis") if raw_item.get("time_basis") in TIME_BASIS else "period",
             "source_section": raw_item.get("source_section") or None,
             "account_name": raw_item.get("account_name") or None,
@@ -263,6 +396,27 @@ def main() -> None:
             for family in pp.METRIC_FAMILIES if family in selected_passes
         }
         result = merge_pass_results(profile_result, metric_results)
+        if "pnl" in metric_results:
+            deterministic = extract_explicit_pnl_metrics(located.marked_text)
+            existing = {
+                (
+                    item.get("metric_type"),
+                    item.get("page"),
+                    item.get("value"),
+                    item.get("unit"),
+                )
+                for item in result.get("metrics") or []
+                if isinstance(item, dict)
+            }
+            result.setdefault("metrics", []).extend(
+                item for item in deterministic
+                if (
+                    item["metric_type"],
+                    item["page"],
+                    item["value"],
+                    item["unit"],
+                ) not in existing
+            )
         top, metrics = normalize(result, located.marked_text)
         accounting_items = normalize_accounting_items(result, located.marked_text)
         top["report_id"] = report["report_id"]
@@ -272,6 +426,9 @@ def main() -> None:
                 sb_delete("periodic_hedge_accounting_items",
                           {"report_id": f"eq.{report['report_id']}"})
             for family in metric_results:
+                if not should_replace_metric_family(is_full_run, family, metrics):
+                    log(f"{family} 短批次返回0条，保留数据库中的既有事实")
+                    continue
                 family_types = ",".join(pp.METRIC_FAMILIES[family])
                 sb_delete("periodic_metric_items", {
                     "report_id": f"eq.{report['report_id']}",
@@ -305,3 +462,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

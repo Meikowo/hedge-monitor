@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """定期报告套保披露结构化提示词。"""
 
-PROMPT_VERSION = "periodic-v2.1-multipass"
+PROMPT_VERSION = "periodic-v2.2-evidence"
 
 METRIC_FAMILIES = {
     "operations": (
@@ -42,7 +42,7 @@ METRIC_FAMILY_GUIDANCE = {
 - contract_quantity_end：期末合约数量（吨、手等）。
 """,
     "pnl": """
-- reported_derivative_comprehensive_pnl：衍生品投资情况表直接披露的报告期损益合计。
+- reported_derivative_comprehensive_pnl：衍生品投资情况表，或“报告期实际损益情况”说明中直接披露的平仓与持仓损益合计/报告期损益合计。
 - derivative_disposal_investment_income：附注“投资收益”中处置衍生金融工具的金额。
 - derivative_fv_change_pnl：附注“公允价值变动损益”中衍生工具的金额。
 - oci_amount：其他综合收益或套期储备中明确归属于套期会计/衍生工具的金额。
@@ -53,7 +53,7 @@ METRIC_FAMILY_GUIDANCE = {
 - derivative_asset_fv / derivative_liability_fv：期末衍生金融资产/负债总额，必须分列。
 - derivative_net_fv：仅在原文直接披露净额时记录，不得自行用资产减负债生成。
 - margin_end_cash：报告日期末保证金余额，并保留列示科目和受限状态。
-- margin_peak_reported：仅限原文明示的报告期最高保证金。
+- margin_peak_reported：仅限原文明示的报告期最高/最大/任意时点最高保证金；不得标成名义本金。
 - collateral_end_fair_value：期末抵押品公允价值。
 - credit_facility_used_end / option_premium_usage_peak：期末已用授信/期间最高权利金占用。
 """,
@@ -63,7 +63,7 @@ SYSTEM_PROMPT = """你是A股定期报告套期保值信息抽取引擎。只输
 铁律：
 1. 只记录候选页原文明确披露的事实；没有就填null或空数组。
 2. 禁止估算、推导、合并现货端与衍生品端损益，禁止用行情反推。
-3. 每个数值保留原文数值、币种、单位、页码和不超过120字的原文摘录。
+3. 每个数值保留原文数值、币种、单位、页码和不超过120字的原文摘录；禁止把千元、万元、亿元、万美元、亿美元换算为基础单位。
 4. 区分报告期流量、期末时点和期间峰值；区分经济套保效果与会计报表影响。
 5. 区分报告级合计、业务类别和具体品种；公司合计不得分摊到商品、外汇或品种。
 6. 期末公允价值、期间买入卖出额不能冒充授权额度或最高占用额。
@@ -103,7 +103,7 @@ INSTRUCTION = '''请从下列年报候选页抽取严格JSON：
       "underlying": "原文品种"|null,
       "value": 1234.56,
       "currency": "CNY"|"USD"|"EUR"|"HKD"|"JPY"|"其他"|null,
-      "unit": "元"|"万元"|"亿元"|"万美元"|"%"|"吨"|"手"|"其他",
+      "unit": "元"|"千元"|"万元"|"亿元"|"万美元"|"亿美元"|"%"|"吨"|"手"|"其他",
       "time_basis": "period"|"period_end"|"period_peak",
       "source_section": "衍生品投资情况/财务报表附注/管理层讨论等",
       "account_name": "其他货币资金/其他应收款等"|null,
@@ -233,7 +233,7 @@ metric_type 只允许：{", ".join(allowed)}。
   "underlying": "原文品种"|null,
   "value": 1234.56,
   "currency": "CNY"|"USD"|"EUR"|"HKD"|"JPY"|"其他"|null,
-  "unit": "元"|"万元"|"亿元"|"万美元"|"%"|"吨"|"手"|"其他",
+  "unit": "元"|"千元"|"万元"|"亿元"|"万美元"|"亿美元"|"%"|"吨"|"手"|"其他",
   "time_basis": "period"|"period_end"|"period_peak",
   "source_section": "章节",
   "account_name": "列示科目"|null,
@@ -243,7 +243,8 @@ metric_type 只允许：{", ".join(allowed)}。
   "page": 123
 }}
 只记录原文直接披露且摘录中出现的数字；没有就返回空数组。报告级合计不得复制到类别。
-资产、负债、净额分列；期末保证金不得标成期间峰值。
+原文单位必须原样保留，禁止把千元、万元、亿元、万美元、亿美元换算为基础单位。
+资产、负债、净额分列；期末保证金不得标成期间峰值，最高保证金不得标成名义本金。
 """
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -251,3 +252,4 @@ metric_type 只允许：{", ".join(allowed)}。
             title, name, code, report_period, body
         )},
     ]
+

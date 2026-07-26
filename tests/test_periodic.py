@@ -5,13 +5,15 @@ from pathlib import Path
 import yaml
 
 from scripts.extract_periodic_reports import (
+    extract_explicit_pnl_metrics,
     merge_pass_results,
     normalize,
     normalize_accounting_items,
+    should_replace_metric_family,
     verify_raw_value,
 )
 from scripts.extract_announcements import thinking_extra_body
-from scripts.prompt_periodic import METRIC_FAMILIES
+from scripts.prompt_periodic import METRIC_FAMILIES, build_metric_messages
 from scripts.periodic_verification import classify
 from scripts.periodic_pdf import (
     MAX_MARKED_CHARS,
@@ -55,6 +57,40 @@ class PeriodicNormalizationTest(unittest.TestCase):
 
         self.assertEqual(metrics, [])
 
+    def test_percentage_zero_cannot_verify_a_monetary_zero(self):
+        body = "【P48】货币互换合约 - 940,900 5,045 - - - - 0.00%"
+        _, monetary = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "ending_balance",
+                "fact_level": "underlying",
+                "scope": "外汇",
+                "underlying": "货币互换合约",
+                "value": 0,
+                "unit": "千元",
+                "time_basis": "period_end",
+                "raw": "货币互换合约 - 940,900 5,045 - - - - 0.00%",
+                "page": 48,
+            }],
+        }, body)
+        _, ratio = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "net_asset_ratio",
+                "fact_level": "underlying",
+                "scope": "外汇",
+                "underlying": "货币互换合约",
+                "value": 0,
+                "unit": "%",
+                "time_basis": "period_end",
+                "raw": "货币互换合约 - 940,900 5,045 - - - - 0.00%",
+                "page": 48,
+            }],
+        }, body)
+
+        self.assertEqual(monetary, [])
+        self.assertEqual(len(ratio), 1)
+
     def test_estimates_cannot_enter_metrics(self):
         top, metrics = normalize({
             "disclosure_status": "有数值", "scopes": ["商品"],
@@ -75,6 +111,104 @@ class PeriodicNormalizationTest(unittest.TestCase):
         self.assertEqual(metrics[0]["unit"], "万元")
         self.assertTrue(metrics[0]["value_verified"])
         self.assertTrue(metrics[0]["quote_verified"])
+
+    def test_metric_restores_original_scaled_rmb_unit(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "notional_peak_reported",
+                "fact_level": "report",
+                "value": 3270000000,
+                "currency": "CNY",
+                "unit": "元",
+                "time_basis": "period_peak",
+                "raw": "任一交易日持有的最高合约价值不超过人民币32.70亿元",
+                "page": 31,
+            }],
+        }, "【P31】任一交易日持有的最高合约价值不超过人民币32.70亿元")
+
+        self.assertEqual(metrics[0]["value"], 32.70)
+        self.assertEqual(metrics[0]["unit"], "亿元")
+        self.assertTrue(metrics[0]["value_verified"])
+
+    def test_metric_restores_original_scaled_foreign_currency_unit(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "notional_peak_reported",
+                "fact_level": "scope",
+                "scope": "外汇",
+                "value": 170000000,
+                "currency": "USD",
+                "unit": "美元",
+                "time_basis": "period_peak",
+                "raw": "外汇衍生品业务任一交易日持有的最高合约价值不超过1.7亿美元",
+                "page": 31,
+            }],
+        }, "【P31】外汇衍生品业务任一交易日持有的最高合约价值不超过1.7亿美元")
+
+        self.assertEqual(metrics[0]["value"], 1.7)
+        self.assertEqual(metrics[0]["unit"], "亿美元")
+        self.assertTrue(metrics[0]["value_verified"])
+
+    def test_peak_margin_is_not_misclassified_as_notional(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "notional_peak_reported",
+                "fact_level": "scope",
+                "scope": "商品",
+                "value": 5450000000,
+                "currency": "CNY",
+                "unit": "元",
+                "time_basis": "period_peak",
+                "raw": "商品期货套期保值业务任意时点保证金最高占用额不超过人民币5.45亿元",
+                "page": 31,
+            }],
+        }, "【P31】商品期货套期保值业务任意时点保证金最高占用额不超过人民币5.45亿元")
+
+        self.assertEqual(metrics[0]["metric_type"], "margin_peak_reported")
+        self.assertEqual(metrics[0]["value"], 5.45)
+        self.assertEqual(metrics[0]["unit"], "亿元")
+        self.assertTrue(metrics[0]["value_verified"])
+
+    def test_empty_selective_pass_preserves_existing_family(self):
+        self.assertFalse(should_replace_metric_family(False, "operations", []))
+        self.assertTrue(should_replace_metric_family(True, "operations", []))
+        self.assertTrue(should_replace_metric_family(
+            False,
+            "operations",
+            [{"metric_type": "period_purchase_amount"}],
+        ))
+
+    def test_pnl_prompt_covers_explicit_actual_pnl_narrative(self):
+        messages = build_metric_messages(
+            "pnl",
+            "2025年年度报告",
+            "株洲冶炼集团股份有限公司",
+            "600961",
+            "2025-12-31",
+            "【P30】报告期实际损益情况的说明",
+        )
+        prompt = "\n".join(message["content"] for message in messages)
+        self.assertIn("报告期实际损益情况", prompt)
+        self.assertIn("平仓与持仓损益合计", prompt)
+
+    def test_explicit_actual_pnl_has_deterministic_fallback(self):
+        body = """【P30】
+报告期实际损益情况的说明
+计入报告期内的商品衍生品平仓与持仓损益合计为-366,065,852.86 元。
+套期保值效果的说明
+"""
+        metrics = extract_explicit_pnl_metrics(body)
+
+        self.assertEqual(len(metrics), 1)
+        self.assertEqual(metrics[0]["metric_type"], "reported_derivative_comprehensive_pnl")
+        self.assertEqual(metrics[0]["fact_level"], "scope")
+        self.assertEqual(metrics[0]["scope"], "商品")
+        self.assertEqual(metrics[0]["value"], -366065852.86)
+        self.assertEqual(metrics[0]["unit"], "元")
+        self.assertEqual(metrics[0]["page"], 30)
 
     def test_nullish_underlying_is_removed(self):
         top, _ = normalize({"disclosure_status": "未提及", "underlyings": ["None", None, "null"]}, "")
@@ -365,3 +499,4 @@ class PeriodicValidationBatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
