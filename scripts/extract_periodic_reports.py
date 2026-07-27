@@ -47,6 +47,7 @@ POLICY_ONLY_ACCOUNTING_MARKERS = (
     "本集团的套期主要包括",
     "套期会计方法包括",
     "套期分为",
+    "除现金流量套期中属于套期有效的部分",
 )
 
 
@@ -702,6 +703,26 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         "model": env("LLM_MODEL", "MiniMax-M3"), "prompt_version": pp.PROMPT_VERSION,
         "extracted_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
+    has_verified_business_table = any(
+        isinstance(item, dict)
+        and item.get("table_cell_verified") is True
+        and item.get("source_section") == "衍生品投资情况"
+        for item in (result.get("metrics") or [])
+    )
+    has_verified_explicit_derivative_note = any(
+        isinstance(item, dict)
+        and item.get("table_cell_verified") is True
+        and item.get("source_section") in {
+            "投资收益",
+            "公允价值变动收益",
+            "公允价值披露",
+        }
+        and any(
+            marker in str(item.get("raw") or "")
+            for marker in ("衍生金融工具", "衍生金融资产", "衍生金融负债")
+        )
+        for item in (result.get("metrics") or [])
+    )
     metrics: list[dict] = []
     for raw_item in result.get("metrics") or []:
         if not isinstance(raw_item, dict):
@@ -713,6 +734,14 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
             continue
         metric_type = normalize_metric_type(str(raw_item.get("metric_type") or ""), quote)
         if metric_type not in METRICS:
+            continue
+        if (
+            metric_type == "derivative_disposal_investment_income"
+            and not any(
+                marker in quote
+                for marker in ("衍生", "期货", "期权", "远期", "掉期", "互换", "套期")
+            )
+        ):
             continue
         value, unit = restore_literal_scale(value, raw_item.get("unit"), quote)
         value_verified = verify_raw_value(value, quote)
@@ -775,8 +804,25 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
             "quote_verified": quote_verified,
             "value_origin": "reported",
         })
-    if metrics and top["disclosure_status"] == "提及无数值":
-        top["disclosure_status"] = "需复核"
+    deduplicated: list[dict] = []
+    seen_metrics: set[tuple] = set()
+    for item in metrics:
+        key = (
+            item["metric_type"], item["fact_level"], item["scope"],
+            item["underlying"], item["value"], item["currency"], item["unit"],
+            item["time_basis"], item["account_name"], item["page"],
+        )
+        if key in seen_metrics:
+            continue
+        seen_metrics.add(key)
+        deduplicated.append(item)
+    metrics = deduplicated
+    if metrics and top["disclosure_status"] in {"提及无数值", "未提及"}:
+        top["disclosure_status"] = (
+            "有数值"
+            if has_verified_business_table or has_verified_explicit_derivative_note
+            else "需复核"
+        )
     return top, metrics
 
 
@@ -918,4 +964,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -121,8 +121,6 @@ def parse_derivative_investment_table(
     if len(rows) < 2:
         return []
     headers = [re.sub(r"\s+", "", str(cell or "")) for cell in rows[0]]
-    if not headers or "衍生品投资类型" not in headers[0]:
-        return []
     mappings = {
         "本期公允价值变动损益": ("derivative_fv_change_pnl", "period"),
         "计入权益的累计公允价值变动": ("oci_amount", "period"),
@@ -135,6 +133,77 @@ def parse_derivative_investment_table(
             "net_asset_ratio", "period_end",
         ),
     }
+    if not headers or "衍生品投资类型" not in headers[0]:
+        sparse_header = "".join(
+            re.sub(r"\s+", "", str(cell or ""))
+            for row in rows[:10]
+            for cell in row
+        )
+        required = (
+            "衍生品投资类", "本期公", "报告期内购",
+            "报告期内售", "期末金额", "期末投资",
+        )
+        if not all(fragment in sparse_header for fragment in required):
+            return []
+        logical_columns = {
+            3: ("derivative_fv_change_pnl", "period", "本期公允价值变动损益"),
+            4: ("oci_amount", "period", "计入权益的累计公允价值变动"),
+            5: ("period_purchase_amount", "period", "报告期内购入金额"),
+            6: ("period_sale_amount", "period", "报告期内售出金额"),
+            7: ("ending_balance", "period_end", "期末金额"),
+            8: ("net_asset_ratio", "period_end", "期末投资金额占公司报告期末净资产比例"),
+        }
+        compact_rows = [
+            [re.sub(r"\s+", "", str(cell)) for cell in row if str(cell or "").strip()]
+            for row in rows
+        ]
+        metrics: list[dict] = []
+        for compact in compact_rows:
+            if len(compact) < 9:
+                continue
+            label = compact[0]
+            if label == "合计" or "报告期" in label:
+                continue
+            if any(term in label for term in ("远期", "外汇", "汇率", "货币", "掉期")):
+                scope = "外汇"
+            elif "利率" in label:
+                scope = "利率"
+            elif any(term in label for term in ("期货", "期权", "商品")):
+                scope = "商品"
+            else:
+                scope = None
+            for idx, (metric_type, time_basis, header) in logical_columns.items():
+                raw_value = compact[idx]
+                if not raw_value or raw_value in {"-", "—", "–"}:
+                    continue
+                numeric = raw_value.removesuffix("%").replace(",", "")
+                if numeric.startswith("(") and numeric.endswith(")"):
+                    numeric = f"-{numeric[1:-1]}"
+                try:
+                    value = float(numeric)
+                except ValueError:
+                    continue
+                metric_unit = "%" if metric_type == "net_asset_ratio" else unit
+                metrics.append({
+                    "metric_type": metric_type,
+                    "fact_level": "scope" if scope else "report",
+                    "scope": scope,
+                    "underlying": None,
+                    "value": value,
+                    "currency": None if metric_unit == "%" else (
+                        "USD" if "美元" in metric_unit else "CNY"
+                    ),
+                    "unit": metric_unit,
+                    "time_basis": time_basis,
+                    "source_section": "衍生品投资情况",
+                    "account_name": label,
+                    "is_restricted": None,
+                    "counterparty": None,
+                    "raw": f"{label} {header} {raw_value}",
+                    "page": page,
+                    "table_cell_verified": True,
+                })
+        return metrics
     columns = {
         idx: mappings[header]
         for idx, header in enumerate(headers)
@@ -143,7 +212,7 @@ def parse_derivative_investment_table(
     metrics: list[dict] = []
     for row in rows[1:]:
         label = re.sub(r"\s+", "", str(row[0] or ""))
-        if not label or label == "合计" or "报告期" in label or "套期保值" in label:
+        if not label or label == "合计" or "报告期" in label:
             continue
         if any(term in label for term in ("远期", "外汇", "汇率", "货币", "掉期")):
             scope = "外汇"
@@ -250,7 +319,22 @@ def parse_derivative_note_table(
             "table_cell_verified": True,
         })
 
-    for row in rows[1:]:
+    first_row_text = "".join(
+        re.sub(r"\s+", "", str(cell or ""))
+        for cell in rows[0]
+    )
+    first_row_is_header = any(
+        marker in first_row_text
+        for marker in (
+            "项目本期发生额",
+            "款项性质",
+            "期末公允价值",
+            "年末公允价值",
+            "产生公允价值变动收益的来源",
+        )
+    )
+    data_rows = rows[1:] if first_row_is_header else rows
+    for row in data_rows:
         if not row:
             continue
         label = re.sub(r"\s+", "", str(row[0] or ""))
@@ -283,6 +367,21 @@ def parse_derivative_note_table(
         if (
             "衍生金融工具取得的投资收益" in label
             or "处置衍生金融工具取得的投资收益" in label
+            or (
+                "收益" in label
+                and any(
+                    marker in label
+                    for marker in (
+                        "期货",
+                        "期权",
+                        "远期外汇",
+                        "远期结售汇",
+                        "掉期",
+                        "互换",
+                        "T+D",
+                    )
+                )
+            )
         ):
             add(
                 "derivative_disposal_investment_income",
@@ -584,4 +683,3 @@ def locate_pdf(content: bytes, custom_terms: list[str] | None = None) -> Located
         locator_terms=sorted(matched),
         page_scores={p: scores[p] for p in candidate_pages if p in scores},
     )
-
