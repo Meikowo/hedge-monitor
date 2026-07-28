@@ -88,7 +88,7 @@ def unit_before_table(
     candidates: list[tuple[float, str]] = []
     unit_pattern = re.compile(
         r"单位\s*[:：]\s*(?:人民币)?\s*"
-        r"(亿美元|万美元|美元|亿元|万元|千元|元)"
+        r"(亿美元|万美元|美元|亿元|百万元|万元|千元|元)"
     )
     for block in blocks:
         if len(block) < 5:
@@ -123,6 +123,7 @@ def parse_derivative_investment_table(
     headers = [re.sub(r"\s+", "", str(cell or "")) for cell in rows[0]]
     mappings = {
         "本期公允价值变动损益": ("derivative_fv_change_pnl", "period"),
+        "投资收益": ("derivative_disposal_investment_income", "period"),
         "计入权益的累计公允价值变动": ("oci_amount", "period"),
         "报告期内购入金额": ("period_purchase_amount", "period"),
         "报告期内售出金额": ("period_sale_amount", "period"),

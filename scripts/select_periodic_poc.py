@@ -25,6 +25,14 @@ def classify(scopes: set[str]) -> str:
     return "外汇"
 
 
+def filter_existing_companies(
+    candidates: list[dict],
+    company_codes: set[str],
+) -> list[dict]:
+    """只保留满足 periodic_reports 外键的公司主表代码。"""
+    return [item for item in candidates if item.get("code") in company_codes]
+
+
 def aggregate() -> list[dict]:
     rows = sb_select("v_events", {
         "select": "code,name,scope,instruments,underlyings,latest_ann_date,ind_l1,ent_type",
@@ -46,17 +54,35 @@ def aggregate() -> list[dict]:
         item["scopes"].update(row.get("scope") or [])
         item["terms"].update(row.get("instruments") or [])
         item["terms"].update(row.get("underlyings") or [])
-    return list(bag.values())
+    company_codes = {
+        row["code"]
+        for row in sb_select("companies", {"select": "code"}, paginate=True)
+    }
+    candidates = list(bag.values())
+    existing = filter_existing_companies(candidates, company_codes)
+    skipped = len(candidates) - len(existing)
+    if skipped:
+        log(f"公司主表缺失，扩量候选已排除 {skipped} 家")
+    return existing
 
 
-def choose(candidates: list[dict], per_group: int = 10) -> list[dict]:
+def choose(
+    candidates: list[dict],
+    per_group: int = 10,
+    seed_codes: set[str] | None = None,
+) -> list[dict]:
+    seed_codes = seed_codes or set()
     selected: list[dict] = []
     for group in GROUPS:
         pool = [x for x in candidates if classify(x["scopes"]) == group]
         pool.sort(key=lambda x: (-x["event_count"], x["industry"], x["ent_type"], x["code"]))
         used_industries: defaultdict[str, int] = defaultdict(int)
         used_types: defaultdict[str, int] = defaultdict(int)
-        chosen: list[dict] = []
+        chosen = [x for x in pool if x["code"] in seed_codes]
+        pool = [x for x in pool if x["code"] not in seed_codes]
+        for item in chosen:
+            used_industries[item["industry"]] += 1
+            used_types[item["ent_type"]] += 1
         while pool and len(chosen) < per_group:
             best = min(pool, key=lambda x: (
                 used_industries[x["industry"]], used_types[x["ent_type"]],
@@ -74,8 +100,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="选择 M4a 2025FY POC 公司")
     ap.add_argument("--per-group", type=int, default=10)
     ap.add_argument("--output", default=str(ROOT / "config" / "annual_poc_2025.csv"))
+    ap.add_argument(
+        "--seed",
+        help="必须保留的既有样本 CSV；用于扩量时确保人工金标准仍在新池内。",
+    )
     args = ap.parse_args()
-    rows = choose(aggregate(), args.per_group)
+    seed_codes: set[str] = set()
+    if args.seed:
+        with open(args.seed, newline="", encoding="utf-8-sig") as f:
+            seed_codes = {row["code"].zfill(6) for row in csv.DictReader(f)}
+    rows = choose(aggregate(), args.per_group, seed_codes)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="", encoding="utf-8-sig") as f:

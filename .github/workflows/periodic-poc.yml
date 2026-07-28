@@ -11,11 +11,11 @@ on:
         type: choice
         options: [metadata, locate, extract]
       sample_set:
-        description: '样本集：6份验证组 / 30份POC'
+        description: '样本集：6份验证组 / 30份POC / 120家优先池'
         required: true
         default: 'validation6'
         type: choice
-        options: [validation6, poc30]
+        options: [validation6, poc30, priority120]
       limit:
         description: 'locate/extract 最多处理份数'
         required: false
@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 180
     env:
       LLM_THINKING: 'off'
-      SAMPLE_FILE: ${{ inputs.sample_set == 'validation6' && 'config/annual_validation_2025.csv' || 'config/annual_poc_2025.csv' }}
+      SAMPLE_FILE: ${{ inputs.sample_set == 'validation6' && 'config/annual_validation_2025.csv' || inputs.sample_set == 'priority120' && 'config/annual_priority_2025.csv' || 'config/annual_poc_2025.csv' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

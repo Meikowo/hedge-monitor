@@ -1,9 +1,14 @@
 import csv
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
+import scripts.extract_periodic_reports as periodic_extract
+import scripts.fetch_periodic_reports as periodic_fetch
+import scripts.select_periodic_poc as periodic_select
+import scripts.extract_announcements as announcement_extract
 from scripts.extract_periodic_reports import (
     extract_explicit_pnl_metrics,
     merge_verified_note_metrics,
@@ -44,6 +49,20 @@ class PeriodicNormalizationTest(unittest.TestCase):
             thinking_extra_body("on"),
             {"thinking": {"type": "adaptive"}},
         )
+
+    def test_thinking_only_output_is_retryable_but_truncated_json_is_not(self):
+        self.assertTrue(hasattr(announcement_extract, "NoJsonObjectError"))
+        self.assertTrue(hasattr(announcement_extract, "IncompleteJsonError"))
+        with self.assertRaises(announcement_extract.NoJsonObjectError):
+            announcement_extract.extract_json_obj("<think>åªæœ‰æ€è€ƒï¼Œæ²¡æœ‰æ­£æ–‡</think>")
+        with self.assertRaises(announcement_extract.IncompleteJsonError):
+            announcement_extract.extract_json_obj('{"metrics": [')
+
+    def test_periodic_llm_calls_explicitly_disable_thinking(self):
+        self.assertTrue(hasattr(periodic_extract, "call_periodic_llm"))
+        with patch.object(periodic_extract, "call_llm", return_value={}) as mocked:
+            self.assertEqual(periodic_extract.call_periodic_llm([]), {})
+        mocked.assert_called_once_with([], thinking_setting="off")
 
     def test_raw_value_requires_literal_number(self):
         self.assertTrue(verify_raw_value(1234.56, "æœ¬æœŸé‡‘é¢ä¸º1,234.56ä¸‡å…ƒ"))
@@ -176,9 +195,30 @@ class PeriodicNormalizationTest(unittest.TestCase):
         self.assertEqual(len(metrics), 1)
         self.assertEqual(top["disclosure_status"], "æœ‰æ•°å€¼")
 
-    def test_verified_explicit_derivative_note_resolves_status_to_has_values(self):
+    def test_verified_explicit_derivative_note_without_hedge_context_needs_review(self):
         top, metrics = normalize({
             "disclosure_status": "æœªæåŠ",
+            "metrics": [{
+                "metric_type": "derivative_fv_change_pnl",
+                "fact_level": "report",
+                "value": 498580.86,
+                "unit": "å…ƒ",
+                "time_basis": "period",
+                "source_section": "å…¬å…ä»·å€¼å˜åŠ¨æ”¶ç›Š",
+                "raw": "å…¶ä¸­ï¼šè¡ç”Ÿé‡‘èå·¥å…·äº§ç”Ÿçš„å…¬å…ä»·å€¼å˜åŠ¨æ”¶ç›Š æœ¬æœŸå‘ç”Ÿé¢ 498,580.86",
+                "page": 226,
+                "table_cell_verified": True,
+            }],
+        }, "ã€P226ã€‘å…¶ä¸­ï¼šè¡ç”Ÿé‡‘èå·¥å…·äº§ç”Ÿçš„å…¬å…ä»·å€¼å˜åŠ¨æ”¶ç›Š æœ¬æœŸå‘ç”Ÿé¢ 498,580.86")
+
+        self.assertEqual(len(metrics), 1)
+        self.assertEqual(top["disclosure_status"], "éœ€å¤æ ¸")
+
+    def test_verified_explicit_derivative_note_with_hedge_scope_has_values(self):
+        top, metrics = normalize({
+            "disclosure_status": "æœªæåŠ",
+            "scopes": ["å•†å“"],
+            "purpose": "å¥—æœŸä¿å€¼",
             "metrics": [{
                 "metric_type": "derivative_fv_change_pnl",
                 "fact_level": "report",
@@ -214,6 +254,36 @@ class PeriodicNormalizationTest(unittest.TestCase):
                 {**metric, "source_section": "å¸‚åœºä»·æ ¼æˆ–å…¬å…ä»·å€¼å˜åŠ¨æƒ…å†µ"},
             ],
         }, "ã€P29ã€‘æœ¬æœŸå…¬å…ä»·å€¼å˜åŠ¨æŸç›Š-7,676,900.00å…ƒ")
+
+        self.assertEqual(len(metrics), 1)
+
+    def test_same_fair_value_fact_deduplicates_numbered_account_prefix(self):
+        base = {
+            "metric_type": "derivative_liability_fv",
+            "fact_level": "report",
+            "value": 471789.77,
+            "unit": "å…ƒ",
+            "time_basis": "period_end",
+            "source_section": "å…¬å…ä»·å€¼çš„æŠ«éœ²",
+            "page": 215,
+        }
+        _, metrics = normalize({
+            "disclosure_status": "æœ‰æ•°å€¼",
+            "metrics": [
+                {
+                    **base,
+                    "account_name": "ï¼ˆä¹ï¼‰è¡ç”Ÿé‡‘èè´Ÿå€º",
+                    "raw": "ï¼ˆä¹ï¼‰è¡ç”Ÿé‡‘èè´Ÿå€º æœŸæœ«å…¬å…ä»·å€¼åˆè®¡ 471,789.77",
+                    "table_cell_verified": True,
+                },
+                {
+                    **base,
+                    "account_name": "è¡ç”Ÿé‡‘èè´Ÿå€º",
+                    "raw": "è¡ç”Ÿé‡‘èè´Ÿå€º æœŸæœ«å…¬å…ä»·å€¼åˆè®¡ 471,789.77",
+                    "table_cell_verified": True,
+                },
+            ],
+        }, "ã€P215ã€‘è¡ç”Ÿé‡‘èè´Ÿå€ºæœŸæœ«å…¬å…ä»·å€¼åˆè®¡471,789.77å…ƒ")
 
         self.assertEqual(len(metrics), 1)
 
@@ -287,987 +357,8 @@ class PeriodicNormalizationTest(unittest.TestCase):
                 "raw": "å•†å“æœŸè´§å¥—æœŸä¿å€¼ä¸šåŠ¡ä»»æ„æ—¶ç‚¹ä¿è¯é‡‘æœ€é«˜å ç”¨é¢ä¸è¶…è¿‡äººæ°‘å¸5.45äº¿å…ƒ",
                 "page": 31,
             }],
-        }, "ã€P31ã€‘å•†å“æœŸè´§å¥—æœŸä¿å€¼ä¸šåŠ¡ä»»æ„æ—¶ç‚¹ä¿è¯é‡‘æœ€é«˜å ç”¨é¢ä¸è¶…è¿‡äººæ°‘å¸5.45äº¿å…ƒ")
-
-        self.assertEqual(metrics[0]["metric_type"], "margin_peak_reported")
-        self.assertEqual(metrics[0]["value"], 5.45)
-        self.assertEqual(metrics[0]["unit"], "äº¿å…ƒ")
-        self.assertTrue(metrics[0]["value_verified"])
-
-    def test_empty_selective_pass_preserves_existing_family(self):
-        self.assertFalse(should_replace_metric_family(False, "operations", []))
-        self.assertTrue(should_replace_metric_family(True, "operations", []))
-        self.assertTrue(should_replace_metric_family(
-            False,
-            "operations",
-            [{"metric_type": "period_purchase_amount"}],
-        ))
-        self.assertTrue(should_purge_legacy_metrics(True))
-        self.assertFalse(should_purge_legacy_metrics(False))
-
-    def test_pnl_prompt_covers_explicit_actual_pnl_narrative(self):
-        messages = build_metric_messages(
-            "pnl",
-            "2025å¹´å¹´åº¦æŠ¥å‘Š",
-            "æ ªæ´²å†¶ç‚¼é›†å›¢è‚¡ä»½æœ‰é™å…¬å¸",
-            "600961",
-            "2025-12-31",
-            "ã€P30ã€‘æŠ¥å‘ŠæœŸå®é™…æŸç›Šæƒ…å†µçš„è¯´æ˜",
-        )
-        prompt = "\n".join(message["content"] for message in messages)
-        self.assertIn("æŠ¥å‘ŠæœŸå®é™…æŸç›Šæƒ…å†µ", prompt)
-        self.assertIn("å¹³ä»“ä¸æŒä»“æŸç›Šåˆè®¡", prompt)
-
-    def test_explicit_actual_pnl_has_deterministic_fallback(self):
-        body = """ã€P30ã€‘
-æŠ¥å‘ŠæœŸå®é™…æŸç›Šæƒ…å†µçš„è¯´æ˜
-è®¡å…¥æŠ¥å‘ŠæœŸå†…çš„å•†å“è¡ç”Ÿå“å¹³ä»“ä¸æŒä»“æŸç›Šåˆè®¡ä¸º-366,065,852.86 å…ƒã€‚
-å¥—æœŸä¿å€¼æ•ˆæœçš„è¯´æ˜
-"""
-        metrics = extract_explicit_pnl_metrics(body)
-
-        self.assertEqual(len(metrics), 1)
-        self.assertEqual(metrics[0]["metric_type"], "reported_derivative_comprehensive_pnl")
-        self.assertEqual(metrics[0]["fact_level"], "scope")
-        self.assertEqual(metrics[0]["scope"], "å•†å“")
-        self.assertEqual(metrics[0]["value"], -366065852.86)
-        self.assertEqual(metrics[0]["unit"], "å…ƒ")
-        self.assertEqual(metrics[0]["page"], 30)
-
-    def test_actual_pnl_fallback_handles_multiple_business_rows(self):
-        body = """ã€P35ã€‘
-æŠ¥å‘ŠæœŸå®é™…æŸç›Šæƒ…å†µçš„è¯´æ˜
-æœŸè´§å¥—ä¿åˆçº¦æŠ¥å‘ŠæœŸå†…å®é™…æŸç›Šä¸º19,495.74 ä¸‡å…ƒï¼Œè¿œæœŸé‡‘èåˆçº¦æŠ¥å‘ŠæœŸå†…å®é™…æŸç›Šä¸º-3,703.30 ä¸‡å…ƒã€‚
-"""
-        metrics = extract_explicit_pnl_metrics(body)
-
-        self.assertEqual([
-            (item["scope"], item["value"], item["unit"])
-            for item in metrics
-        ], [
-            ("å•†å“", 19495.74, "ä¸‡å…ƒ"),
-            ("å¤–æ±‡", -3703.30, "ä¸‡å…ƒ"),
-        ])
-
-    def test_actual_pnl_fallback_handles_unscoped_amount_below_section_heading(self):
-        body = """ã€P35ã€‘
-æŠ¥å‘ŠæœŸå®é™…æŸç›Šæƒ…å†µçš„è¯´æ˜
-å®é™…æŸç›Šé‡‘é¢ä¸º15,009.45 ä¸‡å…ƒ
-å¥—æœŸä¿å€¼æ•ˆæœçš„è¯´æ˜
-"""
-        metrics = extract_explicit_pnl_metrics(body)
-
-        self.assertEqual([
-            (item["fact_level"], item["scope"], item["value"], item["unit"])
-            for item in metrics
-        ], [
-            ("report", None, 15009.45, "ä¸‡å…ƒ"),
-        ])
-
-    def test_unverified_model_scaled_value_is_not_persisted(self):
-        _, metrics = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "metrics": [{
-                "metric_type": "reported_derivative_comprehensive_pnl",
-                "fact_level": "scope",
-                "scope": "å•†å“",
-                "value": 194957400,
-                "currency": "CNY",
-                "unit": "ä¸‡å…ƒ",
-                "time_basis": "period",
-                "raw": "æœŸè´§å¥—ä¿åˆçº¦æŠ¥å‘ŠæœŸå†…å®é™…æŸç›Šä¸º19,495.74ä¸‡å…ƒ",
-                "page": 35,
-            }],
-        }, "ã€P35ã€‘æœŸè´§å¥—ä¿åˆçº¦æŠ¥å‘ŠæœŸå†…å®é™…æŸç›Šä¸º19,495.74ä¸‡å…ƒ")
-
-        self.assertEqual(metrics, [])
-
-    def test_explicit_no_derivative_business_is_mention_without_value(self):
-        top, metrics = normalize({
-            "disclosure_status": "æœªæåŠ",
-            "summary": "å…¬å¸æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„ã€‚",
-            "metrics": [],
-        }, "ã€P32ã€‘å…¬å¸æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„ã€‚")
-
-        self.assertEqual(metrics, [])
-        self.assertEqual(top["disclosure_status"], "æåŠæ— æ•°å€¼")
-
-    def test_accounting_policy_is_not_evidence_of_actual_application(self):
-        messages = build_profile_messages(
-            "2025å¹´å¹´åº¦æŠ¥å‘Š",
-            "æ ¼åŠ›ç”µå™¨",
-            "000651",
-            "2025FY",
-            "ã€P125ã€‘æœ¬å…¬å¸çš„å¥—æœŸåŒ…æ‹¬å…¬å…ä»·å€¼å¥—æœŸã€ç°é‡‘æµé‡å¥—æœŸä»¥åŠå¢ƒå¤–ç»è¥å‡€æŠ•èµ„å¥—æœŸã€‚",
-        )
-        prompt = "\n".join(message["content"] for message in messages)
-
-        self.assertIn("ä¼šè®¡æ”¿ç­–", prompt)
-        self.assertIn("ä¸èƒ½è¯æ˜æŠ¥å‘ŠæœŸå®é™…åº”ç”¨", prompt)
-
-    def test_group_policy_wording_is_not_actual_application(self):
-        top, _ = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "hedge_accounting_status": "å·²åº”ç”¨",
-            "hedge_accounting_types": ["ç°é‡‘æµé‡å¥—æœŸ"],
-            "hedge_accounting_evidence": {
-                "page": 185,
-                "quote": "æœ¬é›†å›¢çš„å¥—æœŸä¸»è¦åŒ…æ‹¬ç°é‡‘æµé‡å¥—æœŸã€‚",
-            },
-        }, "ã€P185ã€‘æœ¬é›†å›¢çš„å¥—æœŸä¸»è¦åŒ…æ‹¬ç°é‡‘æµé‡å¥—æœŸã€‚")
-
-        self.assertEqual(top["hedge_accounting_status"], "æœªæ˜ç¡®æŠ«éœ²")
-        self.assertEqual(top["hedge_accounting_types"], [])
-        self.assertIsNone(top["hedge_accounting_page"])
-
-    def test_policy_only_types_are_replaced_by_actual_cash_flow_hedge_evidence(self):
-        top, _ = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "hedge_accounting": ["å…¬å…ä»·å€¼å¥—æœŸ", "ç°é‡‘æµé‡å¥—æœŸ", "å¢ƒå¤–ç»è¥å‡€æŠ•èµ„å¥—æœŸ"],
-            "hedge_accounting_status": "æ··åˆåº”ç”¨",
-            "hedge_accounting_types": ["å…¬å…ä»·å€¼å¥—æœŸ", "ç°é‡‘æµé‡å¥—æœŸ", "å¢ƒå¤–ç»è¥å‡€æŠ•èµ„å¥—æœŸ"],
-            "hedge_accounting_evidence": {
-                "page": 125,
-                "quote": "æœ¬å…¬å¸çš„å¥—æœŸåŒ…æ‹¬å…¬å…ä»·å€¼å¥—æœŸã€ç°é‡‘æµé‡å¥—æœŸä»¥åŠå¯¹å¢ƒå¤–ç»è¥å‡€æŠ•èµ„çš„å¥—æœŸã€‚",
-            },
-        }, (
-            "ã€P125ã€‘æœ¬å…¬å¸çš„å¥—æœŸåŒ…æ‹¬å…¬å…ä»·å€¼å¥—æœŸã€ç°é‡‘æµé‡å¥—æœŸä»¥åŠå¯¹å¢ƒå¤–ç»è¥å‡€æŠ•èµ„çš„å¥—æœŸã€‚\n"
-            "ã€P171ã€‘ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡ 291,500.00"
-        ))
-
-        self.assertEqual(top["hedge_accounting_status"], "å·²åº”ç”¨")
-        self.assertEqual(top["hedge_accounting_types"], ["ç°é‡‘æµé‡å¥—æœŸ"])
-        self.assertEqual(top["hedge_accounting"], ["ç°é‡‘æµé‡å¥—æœŸ"])
-        self.assertEqual(top["hedge_accounting_page"], 171)
-        self.assertTrue(top["hedge_accounting_quote_verified"])
-
-    def test_cash_flow_policy_quote_is_replaced_by_actual_reserve_evidence(self):
-        top, _ = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "hedge_accounting_status": "å·²åº”ç”¨",
-            "hedge_accounting_types": ["ç°é‡‘æµé‡å¥—æœŸ"],
-            "hedge_accounting_evidence": {
-                "page": 126,
-                "quote": "é¢„æœŸç°é‡‘æµé‡å½±å“æŸç›Šçš„ç›¸åŒæœŸé—´ï¼Œå°†ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡è½¬å‡ºã€‚",
-            },
-        }, (
-            "ã€P126ã€‘é¢„æœŸç°é‡‘æµé‡å½±å“æŸç›Šçš„ç›¸åŒæœŸé—´ï¼Œå°†ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡è½¬å‡ºã€‚\n"
-            "ã€P171ã€‘ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡ -2,219,839.96 291,500.00"
-        ))
-
-        self.assertEqual(top["hedge_accounting_page"], 171)
-        self.assertIn("291,500.00", top["hedge_accounting_quote"])
-
-    def test_no_derivative_business_supplies_verified_non_application_evidence(self):
-        top, _ = normalize({
-            "disclosure_status": "æœªæåŠ",
-            "hedge_accounting_status": "æœªåº”ç”¨",
-            "hedge_accounting_evidence": {
-                "page": 132,
-                "quote": "å¥—æœŸä¼šè®¡æ”¿ç­–åŒ…æ‹¬ç°é‡‘æµé‡å¥—æœŸã€‚",
-            },
-        }, "ã€P32ã€‘å…¬å¸æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„ã€‚")
-
-        self.assertEqual(top["disclosure_status"], "æåŠæ— æ•°å€¼")
-        self.assertEqual(top["hedge_accounting_status"], "æœªåº”ç”¨")
-        self.assertEqual(top["non_application_reason"], "æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„")
-        self.assertEqual(top["hedge_accounting_page"], 32)
-        self.assertTrue(top["hedge_accounting_quote_verified"])
-
-    def test_explicit_not_applicable_hedge_accounting_checkbox_means_not_applied(self):
-        top, _ = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "hedge_accounting_status": "æœªæ˜ç¡®æŠ«éœ²",
-        }, (
-            "ã€P259ã€‘(2). å…¬å¸å¼€å±•ç¬¦åˆæ¡ä»¶å¥—æœŸä¸šåŠ¡å¹¶åº”ç”¨å¥—æœŸä¼šè®¡\n"
-            "â–¡é€‚ç”¨ âˆšä¸é€‚ç”¨"
-        ))
-
-        self.assertEqual(top["hedge_accounting_status"], "æœªåº”ç”¨")
-        self.assertEqual(top["hedge_accounting_types"], [])
-        self.assertIsNone(top["non_application_reason"])
-        self.assertEqual(top["hedge_accounting_page"], 259)
-        self.assertTrue(top["hedge_accounting_quote_verified"])
-
-    def test_verified_table_cells_replace_llm_column_guesses(self):
-        result = {
-            "metrics": [{
-                "metric_type": "period_purchase_amount",
-                "value": 3544.49,
-                "page": 35,
-            }]
-        }
-        table_metrics = [{
-            "metric_type": "derivative_fv_change_pnl",
-            "value": 3544.49,
-            "page": 35,
-            "table_cell_verified": True,
-        }]
-
-        merged = merge_table_metrics(
-            result,
-            table_metrics,
-            table_pages={35},
-            selected_passes=["operations", "pnl"],
-        )
-
-        self.assertEqual(merged["metrics"], table_metrics)
-
-    def test_verified_note_cells_replace_same_page_llm_guess(self):
-        result = {"metrics": [{
-            "metric_type": "margin_end_cash",
-            "value": 32_918_039.90,
-            "page": 312,
-        }]}
-        note_metrics = [{
-            "metric_type": "margin_end_cash",
-            "value": 116_653_692.30,
-            "page": 312,
-            "table_cell_verified": True,
-        }]
-
-        merged = merge_verified_note_metrics(
-            result,
-            note_metrics,
-            selected_passes=["position"],
-        )
-
-        self.assertEqual(merged["metrics"], note_metrics)
-
-    def test_nullish_underlying_is_removed(self):
-        top, _ = normalize({"disclosure_status": "æœªæåŠ", "underlyings": ["None", None, "null"]}, "")
-        self.assertEqual(top["underlyings"], [])
-
-    def test_verification_levels_keep_period_end_distinct_from_peak(self):
-        self.assertEqual(classify("ä¿è¯é‡‘å ç”¨", {"margin_peak_reported"}).level, "A")
-        self.assertEqual(classify("ä¿è¯é‡‘å ç”¨", {"margin_end_cash"}).level, "B")
-        self.assertEqual(classify("ä¿è¯é‡‘å ç”¨", {"period_pnl"}).level, "C")
-        self.assertEqual(classify("ä¿è¯é‡‘å ç”¨", set()).level, "D")
-
-    def test_v15_keeps_pnl_components_as_separate_report_facts(self):
-        top, metrics = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "scopes": ["å•†å“", "å¤–æ±‡"],
-            "hedge_accounting_status": "æœªåº”ç”¨",
-            "hedge_accounting_types": [],
-            "non_application_reason": None,
-            "hedge_accounting_evidence": {
-                "page": 259,
-                "quote": "å…¬å¸å¼€å±•ç¬¦åˆæ¡ä»¶å¥—æœŸä¸šåŠ¡å¹¶åº”ç”¨å¥—æœŸä¼šè®¡ï¼šä¸é€‚ç”¨ã€‚",
-            },
-            "metrics": [
-                {
-                    "metric_type": "reported_derivative_comprehensive_pnl",
-                    "fact_level": "report",
-                    "scope": "å¤–æ±‡",
-                    "value": -3474.88,
-                    "currency": "CNY",
-                    "unit": "ä¸‡å…ƒ",
-                    "time_basis": "period",
-                    "raw": "æŠ•èµ„æ”¶ç›Šä¸å…¬å…ä»·å€¼å˜åŠ¨æŸç›ŠåŠæµ®åŠ¨æŸç›Šåˆè®¡ä¸º-3,474.88ä¸‡å…ƒ",
-                    "page": 44,
-                },
-                {
-                    "metric_type": "derivative_disposal_investment_income",
-                    "fact_level": "report",
-                    "value": 23929647.46,
-                    "currency": "CNY",
-                    "unit": "å…ƒ",
-                    "time_basis": "period",
-                    "raw": "å¤„ç½®è¡ç”Ÿé‡‘èå·¥å…·å–å¾—çš„æŠ•èµ„æ”¶ç›Š23,929,647.46",
-                    "page": 235,
-                },
-                {
-                    "metric_type": "derivative_fv_change_pnl",
-                    "fact_level": "report",
-                    "value": -58678398.34,
-                    "currency": "CNY",
-                    "unit": "å…ƒ",
-                    "time_basis": "period",
-                    "raw": "è¡ç”Ÿé‡‘èå·¥å…·äº§ç”Ÿçš„å…¬å…ä»·å€¼å˜åŠ¨æŸç›Š-58,678,398.34",
-                    "page": 236,
-                },
-            ],
-        }, (
-            "ã€P44ã€‘æŠ•èµ„æ”¶ç›Šä¸å…¬å…ä»·å€¼å˜åŠ¨æŸç›ŠåŠæµ®åŠ¨æŸç›Šåˆè®¡ä¸º-3,474.88ä¸‡å…ƒ\n"
-            "ã€P235ã€‘å¤„ç½®è¡ç”Ÿé‡‘èå·¥å…·å–å¾—çš„æŠ•èµ„æ”¶ç›Š23,929,647.46\n"
-            "ã€P236ã€‘è¡ç”Ÿé‡‘èå·¥å…·äº§ç”Ÿçš„å…¬å…ä»·å€¼å˜åŠ¨æŸç›Š-58,678,398.34\n"
-            "ã€P259ã€‘å…¬å¸å¼€å±•ç¬¦åˆæ¡ä»¶å¥—æœŸä¸šåŠ¡å¹¶åº”ç”¨å¥—æœŸä¼šè®¡ï¼šä¸é€‚ç”¨ã€‚"
-        ))
-
-        self.assertEqual(top["hedge_accounting_status"], "æœªåº”ç”¨")
-        self.assertEqual(top["hedge_accounting_types"], [])
-        self.assertIsNone(top["non_application_reason"])
-        self.assertEqual(top["hedge_accounting_page"], 259)
-        self.assertTrue(top["hedge_accounting_quote_verified"])
-        self.assertEqual([item["metric_type"] for item in metrics], [
-            "reported_derivative_comprehensive_pnl",
-            "derivative_disposal_investment_income",
-            "derivative_fv_change_pnl",
-        ])
-        self.assertTrue(all(item["fact_level"] == "report" for item in metrics))
-        self.assertTrue(all(item["scope"] is None for item in metrics))
-        self.assertTrue(all(item["underlying"] is None for item in metrics))
-
-    def test_generic_trading_asset_disposal_is_not_derivative_income(self):
-        _, metrics = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "metrics": [{
-                "metric_type": "derivative_disposal_investment_income",
-                "fact_level": "report",
-                "value": -102120.75,
-                "unit": "å…ƒ",
-                "time_basis": "period",
-                "raw": "å¤„ç½®äº¤æ˜“æ€§é‡‘èèµ„äº§å–å¾—çš„æŠ•èµ„æ”¶ç›Š -102,120.75",
-                "page": 225,
-            }],
-        }, "ã€P225ã€‘å¤„ç½®äº¤æ˜“æ€§é‡‘èèµ„äº§å–å¾—çš„æŠ•èµ„æ”¶ç›Š -102,120.75")
-
-        self.assertEqual(metrics, [])
-
-    def test_v15_margin_fact_keeps_account_context(self):
-        _, metrics = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "metrics": [{
-                "metric_type": "margin_end_cash",
-                "fact_level": "scope",
-                "scope": "å•†å“",
-                "value": 65000,
-                "currency": "CNY",
-                "unit": "ä¸‡å…ƒ",
-                "time_basis": "period_end",
-                "account_name": "å…¶ä»–è´§å¸èµ„é‡‘",
-                "is_restricted": True,
-                "counterparty": "æŸæœŸè´§å…¬å¸",
-                "raw": "æœŸæœ«æœŸè´§ä¿è¯é‡‘65,000ä¸‡å…ƒï¼Œåˆ—å…¥å…¶ä»–è´§å¸èµ„é‡‘",
-                "page": 188,
-            }],
-        }, "ã€P188ã€‘æœŸæœ«æœŸè´§ä¿è¯é‡‘65,000ä¸‡å…ƒï¼Œåˆ—å…¥å…¶ä»–è´§å¸èµ„é‡‘")
-
-        self.assertEqual(metrics[0]["fact_level"], "scope")
-        self.assertEqual(metrics[0]["scope"], "å•†å“")
-        self.assertEqual(metrics[0]["account_name"], "å…¶ä»–è´§å¸èµ„é‡‘")
-        self.assertIs(metrics[0]["is_restricted"], True)
-        self.assertEqual(metrics[0]["counterparty"], "æŸæœŸè´§å…¬å¸")
-
-    def test_v15_underlying_fact_requires_an_underlying(self):
-        _, metrics = normalize({
-            "disclosure_status": "æœ‰æ•°å€¼",
-            "metrics": [{
-                "metric_type": "derivative_asset_fv",
-                "fact_level": "underlying",
-                "scope": "å•†å“",
-                "underlying": None,
-                "value": 100,
-                "unit": "ä¸‡å…ƒ",
-                "time_basis": "period_end",
-                "raw": "è¡ç”Ÿé‡‘èèµ„äº§100ä¸‡å…ƒ",
-                "page": 20,
-            }],
-        }, "ã€P20ã€‘è¡ç”Ÿé‡‘èèµ„äº§100ä¸‡å…ƒ")
-
-        self.assertEqual(metrics[0]["fact_level"], "scope")
-        self.assertEqual(metrics[0]["scope"], "å•†å“")
-
-    def test_v15_mixed_accounting_items_keep_business_level_evidence(self):
-        body = (
-            "ã€P88ã€‘å¤–æ±‡è¿œæœŸé‡‡ç”¨ç°é‡‘æµé‡å¥—æœŸã€‚\n"
-            "ã€P89ã€‘å•†å“æœŸè´§æœªåº”ç”¨å¥—æœŸä¼šè®¡ï¼Œå› ä¸ç¬¦åˆå¥—æœŸä¼šè®¡æŒ‡å®šæ¡ä»¶ã€‚"
-        )
-        items = normalize_accounting_items({
-            "hedge_accounting_items": [
-                {
-                    "scope": "å¤–æ±‡",
-                    "instrument": "å¤–æ±‡è¿œæœŸ",
-                    "underlying_asset": "ç¾å…ƒ",
-                    "application_status": "å·²åº”ç”¨",
-                    "accounting_type": "ç°é‡‘æµé‡å¥—æœŸ",
-                    "non_application_reason": None,
-                    "source_section": "å¥—æœŸä¼šè®¡",
-                    "page": 88,
-                    "quote": "å¤–æ±‡è¿œæœŸé‡‡ç”¨ç°é‡‘æµé‡å¥—æœŸã€‚",
-                    "confidence": 0.98,
-                },
-                {
-                    "scope": "å•†å“",
-                    "instrument": "æœŸè´§",
-                    "underlying_asset": "é“œ",
-                    "application_status": "æœªåº”ç”¨",
-                    "accounting_type": None,
-                    "non_application_reason": "ä¸ç¬¦åˆå¥—æœŸä¼šè®¡æŒ‡å®šæ¡ä»¶",
-                    "source_section": "è¡ç”Ÿå“æŠ•èµ„æƒ…å†µ",
-                    "page": 89,
-                    "quote": "å•†å“æœŸè´§æœªåº”ç”¨å¥—æœŸä¼šè®¡ï¼Œå› ä¸ç¬¦åˆå¥—æœŸä¼šè®¡æŒ‡å®šæ¡ä»¶ã€‚",
-                    "confidence": 0.95,
-                },
-            ],
-        }, body)
-
-        self.assertEqual(len(items), 2)
-        self.assertEqual(items[0]["accounting_type"], "ç°é‡‘æµé‡å¥—æœŸ")
-        self.assertTrue(items[0]["quote_verified"])
-        self.assertEqual(items[1]["non_application_reason"], "ä¸ç¬¦åˆå¥—æœŸä¼šè®¡æŒ‡å®šæ¡ä»¶")
-        self.assertFalse(items[1]["need_review"])
-
-    def test_uncertain_accounting_item_does_not_keep_a_policy_method(self):
-        items = normalize_accounting_items({
-            "hedge_accounting_items": [{
-                "scope": "å¤–æ±‡",
-                "instrument": "å¤–æ±‡è¿œæœŸ",
-                "application_status": "æœªæ˜ç¡®æŠ«éœ²",
-                "accounting_type": "ç°é‡‘æµé‡å¥—æœŸ",
-                "page": 48,
-                "quote": "å¤–æ±‡è¿œæœŸåˆçº¦æœŸæœ«é‡‘é¢516,807åƒå…ƒã€‚",
-            }],
-        }, "ã€P48ã€‘å¤–æ±‡è¿œæœŸåˆçº¦æœŸæœ«é‡‘é¢516,807åƒå…ƒã€‚")
-
-        self.assertEqual(items[0]["application_status"], "æœªæ˜ç¡®æŠ«éœ²")
-        self.assertIsNone(items[0]["accounting_type"])
-
-    def test_policy_only_quote_is_not_duplicated_into_business_items(self):
-        items = normalize_accounting_items({
-            "hedge_accounting_items": [{
-                "scope": "å¤–æ±‡",
-                "instrument": "å¤–æ±‡è¿œæœŸ",
-                "application_status": "æœªæ˜ç¡®æŠ«éœ²",
-                "accounting_type": "ç°é‡‘æµé‡å¥—æœŸ",
-                "page": 185,
-                "quote": "æœ¬é›†å›¢çš„å¥—æœŸä¸»è¦åŒ…æ‹¬ç°é‡‘æµé‡å¥—æœŸã€‚",
-            }],
-        }, "ã€P185ã€‘æœ¬é›†å›¢çš„å¥—æœŸä¸»è¦åŒ…æ‹¬ç°é‡‘æµé‡å¥—æœŸã€‚")
-
-        self.assertEqual(items, [])
-
-    def test_generic_cash_flow_hedge_policy_is_not_a_business_item(self):
-        quote = (
-            "é™¤ç°é‡‘æµé‡å¥—æœŸä¸­å±äºå¥—æœŸæœ‰æ•ˆçš„éƒ¨åˆ†è®¡å…¥å…¶ä»–ç»¼åˆæ”¶ç›Šå¹¶äºè¢«å¥—æœŸé¡¹ç›®"
-            "å½±å“æŸç›Šæ—¶è½¬å‡ºè®¡å…¥å½“æœŸæŸç›Šä¹‹å¤–ï¼Œè¡ç”Ÿå·¥å…·å…¬å…ä»·å€¼å˜åŠ¨è€Œäº§ç”Ÿçš„åˆ©å¾—"
-            "æˆ–æŸå¤±ï¼Œç›´æ¥è®¡å…¥å½“æœŸæŸç›Š"
-        )
-        items = normalize_accounting_items({
-            "hedge_accounting_items": [{
-                "scope": "å¤–æ±‡",
-                "instrument": "æœªå…·ä½“æŠ«éœ²",
-                "application_status": "éœ€å¤æ ¸",
-                "page": 141,
-                "quote": quote,
-            }],
-        }, f"ã€P141ã€‘{quote}")
-
-        self.assertEqual(items, [])
-
-    def test_decisive_accounting_item_removes_same_scope_uncertain_duplicate(self):
-        body = (
-            "ã€P35ã€‘å•†å“æœŸè´§æ˜¯å¦åº”ç”¨å¥—æœŸä¼šè®¡æœªæ˜ç¡®æŠ«éœ²ã€‚\n"
-            "ã€P171ã€‘ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡ 291,500.00"
-        )
-        items = normalize_accounting_items({
-            "hedge_accounting_items": [
-                {
-                    "scope": "å•†å“",
-                    "application_status": "æœªæ˜ç¡®æŠ«éœ²",
-                    "page": 35,
-                    "quote": "å•†å“æœŸè´§æ˜¯å¦åº”ç”¨å¥—æœŸä¼šè®¡æœªæ˜ç¡®æŠ«éœ²ã€‚",
-                },
-                {
-                    "scope": "å•†å“",
-                    "application_status": "å·²åº”ç”¨",
-                    "accounting_type": "ç°é‡‘æµé‡å¥—æœŸ",
-                    "page": 171,
-                    "quote": "ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡ 291,500.00",
-                },
-            ],
-        }, body)
-
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["application_status"], "å·²åº”ç”¨")
-
-    def test_unverified_decisive_accounting_claim_is_dropped(self):
-        items = normalize_accounting_items({
-            "hedge_accounting_items": [{
-                "scope": "å¤–æ±‡",
-                "application_status": "å·²åº”ç”¨",
-                "accounting_type": "å…¬å…ä»·å€¼å¥—æœŸ",
-                "page": 35,
-                "quote": "è¿œæœŸé‡‘èåˆçº¦é‡‡ç”¨å…¬å…ä»·å€¼å¥—æœŸã€‚",
-            }],
-        }, "ã€P35ã€‘è¿œæœŸé‡‘èåˆçº¦ -17,074.07 -6,509.50")
-
-        self.assertEqual(items, [])
-
-    def test_verified_business_table_row_does_not_prove_accounting_application(self):
-        items = normalize_accounting_items({
-            "hedge_accounting_items": [{
-                "scope": "åˆ©ç‡",
-                "instrument": "åˆ©ç‡æ‰æœŸåˆçº¦",
-                "application_status": "å·²åº”ç”¨",
-                "accounting_type": "ç°é‡‘æµé‡å¥—æœŸ",
-                "page": 48,
-                "quote": "åˆ©ç‡æ‰æœŸåˆçº¦ - 1,823,850 458 - - - 1,747,850 3.47%",
-            }],
-        }, "ã€P48ã€‘åˆ©ç‡æ‰æœŸåˆçº¦ - 1,823,850 458 - - - 1,747,850 3.47%")
-
-        self.assertEqual(items, [])
-
-    def test_cash_flow_reserve_creates_verified_actual_accounting_item(self):
-        items = normalize_accounting_items(
-            {"hedge_accounting_items": []},
-            "ã€P171ã€‘ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡ -2,219,839.96 291,500.00",
-        )
-
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["application_status"], "å·²åº”ç”¨")
-        self.assertEqual(items[0]["accounting_type"], "ç°é‡‘æµé‡å¥—æœŸ")
-        self.assertTrue(items[0]["quote_verified"])
-
-    def test_blank_cash_flow_reserve_row_is_not_actual_application(self):
-        items = normalize_accounting_items(
-            {"hedge_accounting_items": []},
-            "ã€P267ã€‘5.ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡\n"
-            "6.å¤–å¸è´¢åŠ¡æŠ¥è¡¨æŠ˜ç®—å·®é¢\n"
-            "-42,536.92\n-1,055,622.64",
-        )
-
-        self.assertEqual(items, [])
-
-    def test_no_derivative_business_creates_non_application_item(self):
-        items = normalize_accounting_items(
-            {"hedge_accounting_items": [{
-                "application_status": "æœªæ˜ç¡®æŠ«éœ²",
-                "page": 132,
-                "quote": "ä¼šè®¡æ”¿ç­–åŒ…æ‹¬ç°é‡‘æµé‡å¥—æœŸã€‚",
-            }]},
-            "ã€P32ã€‘å…¬å¸æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„ã€‚\n"
-            "ã€P132ã€‘ä¼šè®¡æ”¿ç­–åŒ…æ‹¬ç°é‡‘æµé‡å¥—æœŸã€‚",
-        )
-
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["application_status"], "æœªåº”ç”¨")
-        self.assertEqual(items[0]["page"], 32)
-        self.assertTrue(items[0]["quote_verified"])
-
-    def test_checkbox_keeps_a_verified_specific_non_application_reason(self):
-        body = (
-            "ã€P233ã€‘å…¬å¸å¼€å±•ç¬¦åˆæ¡ä»¶å¥—æœŸä¸šåŠ¡å¹¶åº”ç”¨å¥—æœŸä¼šè®¡ â–¡é€‚ç”¨ âˆšä¸é€‚ç”¨ã€‚\n"
-            "è¡ç”Ÿå·¥å…·æœªè¢«æŒ‡å®šä¸ºå¥—æœŸå·¥å…·æˆ–ä¸ç¬¦åˆå¥—æœŸä¼šè®¡å‡†åˆ™çš„è¦æ±‚ï¼Œæœªåº”ç”¨å¥—æœŸä¼šè®¡ã€‚"
-        )
-        items = normalize_accounting_items({
-            "hedge_accounting_items": [{
-                "scope": "å•†å“",
-                "instrument": "æœŸè´§",
-                "application_status": "æœªåº”ç”¨",
-                "non_application_reason": "è¡ç”Ÿå·¥å…·æœªè¢«æŒ‡å®šä¸ºå¥—æœŸå·¥å…·æˆ–ä¸ç¬¦åˆå¥—æœŸä¼šè®¡å‡†åˆ™çš„è¦æ±‚",
-                "page": 233,
-                "quote": "è¡ç”Ÿå·¥å…·æœªè¢«æŒ‡å®šä¸ºå¥—æœŸå·¥å…·æˆ–ä¸ç¬¦åˆå¥—æœŸä¼šè®¡å‡†åˆ™çš„è¦æ±‚ï¼Œæœªåº”ç”¨å¥—æœŸä¼šè®¡ã€‚",
-            }],
-        }, body)
-
-        self.assertEqual(len(items), 1)
-        self.assertIn("æœªè¢«æŒ‡å®š", items[0]["non_application_reason"])
-
-    def test_verified_accounting_item_promotes_top_level_evidence(self):
-        top = {
-            "hedge_accounting_status": "æœªåº”ç”¨",
-            "hedge_accounting_page": 375,
-            "hedge_accounting_quote": "åŒ…å«çœç•¥å·â€¦â€¦",
-            "hedge_accounting_quote_verified": False,
-            "non_application_reason": "åŸæ–‡æ˜ç¤ºåŸå› ",
-        }
-        items = [{
-            "application_status": "æœªåº”ç”¨",
-            "page": 375,
-            "quote": "è€ƒè™‘äº¤æ˜“æœŸé™çŸ­åŠå¤„ç†æˆæœ¬æ•ˆç›Šï¼Œæœªåº”ç”¨å¥—æœŸä¼šè®¡ã€‚",
-            "quote_verified": True,
-            "non_application_reason": "äº¤æ˜“æœŸé™çŸ­åŠå¤„ç†æˆæœ¬æ•ˆç›Š",
-        }]
-
-        promote_verified_accounting_evidence(top, items)
-
-        self.assertTrue(top["hedge_accounting_quote_verified"])
-        self.assertNotIn("çœç•¥å·", top["hedge_accounting_quote"])
-        self.assertEqual(top["non_application_reason"], "äº¤æ˜“æœŸé™çŸ­åŠå¤„ç†æˆæœ¬æ•ˆç›Š")
-
-    def test_multipass_metric_families_are_disjoint_and_complete(self):
-        members = [metric for family in METRIC_FAMILIES.values() for metric in family]
-
-        self.assertEqual(len(members), len(set(members)))
-        self.assertEqual(set(members), {
-            "period_purchase_amount", "period_sale_amount", "ending_balance",
-            "net_asset_ratio", "notional_end_reported", "notional_peak_reported",
-            "contract_quantity_end", "reported_derivative_comprehensive_pnl",
-            "derivative_disposal_investment_income", "derivative_fv_change_pnl",
-            "oci_amount", "reclassification_amount", "derivative_asset_fv",
-            "derivative_liability_fv", "derivative_net_fv", "margin_end_cash",
-            "margin_peak_reported", "collateral_end_fair_value",
-            "credit_facility_used_end", "option_premium_usage_peak",
-        })
-
-    def test_merge_pass_results_rejects_metrics_from_the_wrong_family(self):
-        merged = merge_pass_results(
-            {"disclosure_status": "æœ‰æ•°å€¼", "metrics": [{"metric_type": "period_pnl"}]},
-            {
-                "operations": {"metrics": [
-                    {"metric_type": "period_purchase_amount", "value": 1},
-                    {"metric_type": "derivative_asset_fv", "value": 2},
-                ]},
-                "position": {"metrics": [
-                    {"metric_type": "derivative_asset_fv", "value": 3},
-                ]},
-            },
-        )
-
-        self.assertEqual([row["value"] for row in merged["metrics"]], [1, 3])
-
-
-class PeriodicValidationBatchTest(unittest.TestCase):
-    ROOT = Path(__file__).resolve().parents[1]
-
-    def test_validation_batch_has_six_unique_cross_scope_companies(self):
-        path = self.ROOT / "config" / "annual_validation_2025.csv"
-        with path.open(newline="", encoding="utf-8-sig") as f:
-            rows = list(csv.DictReader(f))
-
-        self.assertEqual(len(rows), 6)
-        self.assertEqual({row["code"] for row in rows}, {
-            "000039", "000651", "002385", "002649", "600961", "688223",
-        })
-        self.assertEqual({row["scope_group"] for row in rows}, {
-            "å•†å“", "å¤–æ±‡", "å•†å“+å¤–æ±‡",
-        })
-        self.assertTrue(all(row["locator_terms"] for row in rows))
-
-    def test_workflow_defaults_to_validation_batch_and_scopes_all_stages(self):
-        path = self.ROOT / ".github" / "workflows" / "periodic-poc.yml"
-        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
-        dispatch = (workflow.get("on") or workflow.get(True))["workflow_dispatch"]
-        self.assertEqual(dispatch["inputs"]["sample_set"]["default"], "validation6")
-
-        job = workflow["jobs"]["periodic-poc"]
-        self.assertEqual(job["env"]["LLM_THINKING"], "off")
-        sample_expression = job["env"]["SAMPLE_FILE"]
-        self.assertIn("config/annual_validation_2025.csv", sample_expression)
-        self.assertIn("config/annual_poc_2025.csv", sample_expression)
-
-        commands = "\n".join(
-            step.get("run", "") for step in job["steps"] if isinstance(step, dict)
-        )
-        self.assertEqual(commands.count('--sample "$SAMPLE_FILE"'), 3)
-
-    def test_locator_reserves_pages_for_each_financial_fact_family(self):
-        pages = ["å¥—æœŸä¿å€¼ è¡ç”Ÿå“æŠ•èµ„ " * 8 for _ in range(20)]
-        pages.extend([
-            "æ™®é€šç»è¥å†…å®¹",
-            "å…¶ä»–è´§å¸èµ„é‡‘ä¸­æœŸè´§ä¿è¯é‡‘ä¸º100ä¸‡å…ƒ",
-            "æ™®é€šç»è¥å†…å®¹",
-            "å…¬å¸å¯¹å¤–æ±‡è¿œæœŸåº”ç”¨ç°é‡‘æµé‡å¥—æœŸ",
-            "æ™®é€šç»è¥å†…å®¹",
-            "è¡ç”Ÿå·¥å…·å…¬å…ä»·å€¼å˜åŠ¨æŸç›Šä¸º-20ä¸‡å…ƒ",
-            "æ™®é€šç»è¥å†…å®¹",
-            "è¡ç”Ÿé‡‘èèµ„äº§100ä¸‡å…ƒï¼Œè¡ç”Ÿé‡‘èè´Ÿå€º80ä¸‡å…ƒ",
-        ])
-
-        selected, _, _ = select_candidate_pages(pages)
-
-        self.assertTrue({22, 24, 26, 28}.issubset(set(selected)))
-
-    def test_locator_keeps_each_pnl_component_and_both_fair_value_sides(self):
-        pages = ["å¥—æœŸä¿å€¼ è¡ç”Ÿå“æŠ•èµ„ " * 8 for _ in range(20)]
-        pages.extend([
-            "å¤„ç½®è¡ç”Ÿé‡‘èå·¥å…·å–å¾—çš„æŠ•èµ„æ”¶ç›Š",
-            "è¡ç”Ÿå·¥å…·å…¬å…ä»·å€¼å˜åŠ¨æŸç›Š",
-            "ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡è®¡å…¥å…¶ä»–ç»¼åˆæ”¶ç›Š",
-            "æœŸæœ«è¡ç”Ÿé‡‘èèµ„äº§",
-            "æœŸæœ«è¡ç”Ÿé‡‘èè´Ÿå€º",
-        ])
-
-        selected, _, _ = select_candidate_pages(pages)
-
-        self.assertTrue({21, 22, 23, 24, 25}.issubset(set(selected)))
-
-    def test_locator_reserves_a_company_specific_underlying_page(self):
-        pages = ["å¥—æœŸä¿å€¼ è¡ç”Ÿå“æŠ•èµ„ " * 8 for _ in range(20)]
-        pages.extend([
-            "æ™®é€šç»è¥å†…å®¹",
-            "å¤šæ™¶ç¡…æœŸè´§ç”¨äºåŸææ–™ä»·æ ¼é£é™©ç®¡ç†",
-        ])
-
-        selected, matched, _ = select_candidate_pages(pages, ["å¤šæ™¶ç¡…"])
-
-        self.assertIn(22, selected)
-        self.assertIn("å¤šæ™¶ç¡…", matched)
-
-    def test_locator_reserves_actual_accounting_and_specific_financial_notes(self):
-        pages = ["å¥—æœŸä¿å€¼ è¡ç”Ÿå“æŠ•èµ„ " * 8 for _ in range(20)]
-        pages.extend([
-            "å…¬å¸æœªåº”ç”¨å¥—æœŸä¼šè®¡çš„åŸå› æ˜¯äº¤æ˜“æœŸé™è¾ƒçŸ­",
-            "è¡ç”Ÿé‡‘èå·¥å…·èµ„äº§æœŸæœ«ä½™é¢8,305,380å…ƒ",
-            "è¡ç”Ÿé‡‘èå·¥å…·è´Ÿå€ºæœŸæœ«ä½™é¢11,453,070å…ƒ",
-            "è¡ç”Ÿé‡‘èå·¥å…·äº§ç”Ÿçš„å…¬å…ä»·å€¼å˜åŠ¨æ”¶ç›Šä¸º-14,780,760å…ƒ",
-            "æœŸè´§åˆçº¦ä¿è¯é‡‘æœŸæœ«ä½™é¢116,653,692.30å…ƒ",
-        ])
-
-        selected, _, _ = select_candidate_pages(pages)
-
-        self.assertTrue({21, 22, 23, 24, 25}.issubset(set(selected)))
-
-    def test_locator_reserves_cash_flow_hedge_reserve_page(self):
-        pages = ["å¥—æœŸä¿å€¼ è¡ç”Ÿå“æŠ•èµ„ " * 8 for _ in range(20)]
-        pages.extend([
-            "ä¼šè®¡æ”¿ç­– ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡ " * 5,
-            "æ™®é€šç»è¥å†…å®¹",
-            "ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡\næœ¬æœŸæ‰€å¾—ç¨å‰\nå‘ç”Ÿé¢291,500å…ƒ",
-        ])
-
-        selected, _, _ = select_candidate_pages(pages)
-
-        self.assertIn(23, selected)
-
-    def test_standard_derivative_table_keeps_gree_column_meaning(self):
-        rows = [
-            [
-                "è¡ç”Ÿå“æŠ•èµ„ç±»å‹", "åˆå§‹æŠ•èµ„é‡‘é¢", "æœŸåˆé‡‘é¢", "æœ¬æœŸå…¬å…ä»·å€¼\nå˜åŠ¨æŸç›Š",
-                "è®¡å…¥æƒç›Šçš„ç´¯è®¡\nå…¬å…ä»·å€¼å˜åŠ¨", "æŠ¥å‘ŠæœŸå†…è´­\nå…¥é‡‘é¢", "æŠ¥å‘ŠæœŸå†…å”®\nå‡ºé‡‘é¢",
-                "æœŸæœ«é‡‘é¢", "æœŸæœ«æŠ•èµ„é‡‘é¢å \nå…¬å¸æŠ¥å‘ŠæœŸæœ«å‡€\nèµ„äº§æ¯”ä¾‹",
-            ],
-            ["æœŸè´§å¥—ä¿åˆçº¦", "2,471.02", "2,471.02", "3,544.49", "29.15", "", "", "6,015.51", "0.04%"],
-            ["è¿œæœŸé‡‘èåˆçº¦", "-17,074.07", "-17,074.07", "10,386.41", "", "", "", "-6,509.50", "-0.04%"],
-            ["åˆè®¡", "-14,603.05", "-14,603.05", "13,930.90", "29.15", "", "", "-493.99", "0.00%"],
-        ]
-
-        metrics = parse_derivative_investment_table(rows, page=35, unit="ä¸‡å…ƒ")
-
-        self.assertEqual([
-            (item["metric_type"], item["scope"], item["value"])
-            for item in metrics
-        ], [
-            ("derivative_fv_change_pnl", "å•†å“", 3544.49),
-            ("oci_amount", "å•†å“", 29.15),
-            ("ending_balance", "å•†å“", 6015.51),
-            ("net_asset_ratio", "å•†å“", 0.04),
-            ("derivative_fv_change_pnl", "å¤–æ±‡", 10386.41),
-            ("ending_balance", "å¤–æ±‡", -6509.50),
-            ("net_asset_ratio", "å¤–æ±‡", -0.04),
-        ])
-        self.assertNotIn("period_purchase_amount", {
-            item["metric_type"] for item in metrics
-        })
-        self.assertTrue(all(item["table_cell_verified"] for item in metrics))
-
-    def test_standard_derivative_table_extracts_dbn_transactions(self):
-        rows = [
-            [
-                "è¡ç”Ÿå“æŠ•èµ„ç±»å‹", "åˆå§‹æŠ•èµ„é‡‘é¢", "æœŸåˆé‡‘é¢", "æœ¬æœŸå…¬å…ä»·å€¼å˜åŠ¨æŸç›Š",
-                "è®¡å…¥æƒç›Šçš„ç´¯è®¡å…¬å…ä»·å€¼å˜åŠ¨", "æŠ¥å‘ŠæœŸå†…è´­å…¥é‡‘é¢", "æŠ¥å‘ŠæœŸå†…å”®å‡ºé‡‘é¢",
-                "æœŸæœ«é‡‘é¢", "æœŸæœ«æŠ•èµ„é‡‘é¢å å…¬å¸æŠ¥å‘ŠæœŸæœ«å‡€èµ„äº§æ¯”ä¾‹",
-            ],
-            ["æœŸè´§", "", "4,455.11", "-1,478.08", "", "92,099.81", "84,878.89", "11,350.6", "1.17%"],
-        ]
-
-        metrics = parse_derivative_investment_table(rows, page=35, unit="ä¸‡å…ƒ")
-
-        self.assertEqual({
-            item["metric_type"]: item["value"] for item in metrics
-        }, {
-            "derivative_fv_change_pnl": -1478.08,
-            "period_purchase_amount": 92099.81,
-            "period_sale_amount": 84878.89,
-            "ending_balance": 11350.6,
-            "net_asset_ratio": 1.17,
-        })
-
-    def test_standard_derivative_table_keeps_hedging_business_rows(self):
-        rows = [
-            [
-                "è¡ç”Ÿå“æŠ•èµ„ç±»å‹", "åˆå§‹æŠ•èµ„é‡‘é¢", "æœŸåˆé‡‘é¢", "æœ¬æœŸå…¬å…ä»·å€¼å˜åŠ¨æŸç›Š",
-                "è®¡å…¥æƒç›Šçš„ç´¯è®¡å…¬å…ä»·å€¼å˜åŠ¨", "æŠ¥å‘ŠæœŸå†…è´­å…¥é‡‘é¢", "æŠ¥å‘ŠæœŸå†…å”®å‡ºé‡‘é¢",
-                "æœŸæœ«é‡‘é¢", "æœŸæœ«æŠ•èµ„é‡‘é¢å å…¬å¸æŠ¥å‘ŠæœŸæœ«å‡€èµ„äº§æ¯”ä¾‹",
-            ],
-            [
-                "å•†å“æœŸè´§å¥—æœŸä¿å€¼", "", "865.83", "-287.36", "",
-                "118,567.87", "111,110.40", "756.61", "0.20%",
-            ],
-        ]
-
-        metrics = parse_derivative_investment_table(rows, page=49, unit="ä¸‡å…ƒ")
-
-        self.assertEqual({
-            item["metric_type"]: item["value"] for item in metrics
-        }, {
-            "derivative_fv_change_pnl": -287.36,
-            "period_purchase_amount": 118567.87,
-            "period_sale_amount": 111110.40,
-            "ending_balance": 756.61,
-            "net_asset_ratio": 0.20,
-        })
-
-    def test_standard_derivative_table_handles_sparse_multiline_headers(self):
-        rows = [
-            [
-                "", None, None, "", None, None, "", None, "", "æœ¬æœŸå…¬",
-                "", "è®¡å…¥æƒ", "", None, "æŠ¥å‘ŠæœŸå†…è´­", None,
-                "æŠ¥å‘ŠæœŸå†…å”®", None, None, "æœŸæœ«é‡‘é¢", "æœŸæœ«æŠ•èµ„", None,
-            ],
-            [
-                "", "è¡ç”Ÿå“æŠ•èµ„ç±»", None, "", "åˆå§‹æŠ•èµ„é‡‘", None,
-                "æœŸåˆé‡‘é¢", None, "", "å…ä»·å€¼å˜åŠ¨æŸç›Š", None,
-                "ç›Šçš„ç´¯è®¡å…¬å…ä»·å€¼å˜åŠ¨", None, None, "å…¥é‡‘é¢", None,
-                "å‡ºé‡‘é¢", None, None, None, "é‡‘é¢å å…¬å¸æŠ¥å‘ŠæœŸæœ«å‡€èµ„äº§æ¯”ä¾‹", None,
-            ],
-            [
-                "å•†å“å¥—æœŸä¿å€¼", None, None, "865.83", None, None,
-                "865.83", None, "-287.36", None, None, "0", None,
-                None, "118,567.87", None, "111,110.4", None, None,
-                "756.61", "0.20%", None,
-            ],
-        ]
-
-        metrics = parse_derivative_investment_table(rows, page=49, unit="ä¸‡å…ƒ")
-
-        self.assertEqual({
-            item["metric_type"]: item["value"] for item in metrics
-        }, {
-            "derivative_fv_change_pnl": -287.36,
-            "oci_amount": 0.0,
-            "period_purchase_amount": 118567.87,
-            "period_sale_amount": 111110.40,
-            "ending_balance": 756.61,
-            "net_asset_ratio": 0.20,
-        })
-
-    def test_standard_derivative_table_accepts_book_value_header_variant(self):
-        metrics = parse_derivative_investment_table([
-            [
-                "è¡ç”Ÿå“æŠ•èµ„ç±»å‹", "åˆå§‹æŠ•èµ„é‡‘é¢", "æœŸåˆè´¦é¢ä»·å€¼", "æœ¬æœŸå…¬å…ä»·å€¼å˜åŠ¨æŸç›Š",
-                "è®¡å…¥æƒç›Šçš„ç´¯è®¡å…¬å…ä»·å€¼å˜åŠ¨", "æŠ¥å‘ŠæœŸå†…è´­å…¥é‡‘é¢", "æŠ¥å‘ŠæœŸå†…å”®å‡ºé‡‘é¢",
-                "æœŸæœ«è´¦é¢ä»·å€¼", "æœŸæœ«è´¦é¢ä»·å€¼å å…¬å¸æŠ¥å‘ŠæœŸæœ«å‡€èµ„äº§æ¯”ä¾‹ï¼ˆ%ï¼‰",
-            ],
-            ["æ™®é€šè¿œæœŸ", "", "9,825.65", "-9,875.41", "", "23,025.19", "25,141.68", "-2,166.24", "-0.09"],
-        ], page=43, unit="ä¸‡å…ƒ")
-
-        self.assertEqual({
-            item["metric_type"]: item["value"] for item in metrics
-        }, {
-            "derivative_fv_change_pnl": -9875.41,
-            "period_purchase_amount": 23025.19,
-            "period_sale_amount": 25141.68,
-            "ending_balance": -2166.24,
-            "net_asset_ratio": -0.09,
-        })
-
-    def test_note_tables_extract_margin_positions_and_pnl_components(self):
-        margin = parse_derivative_note_table([
-            ["æ¬¾é¡¹æ€§è´¨", "å¹´æœ«è´¦é¢ä½™é¢", "å¹´åˆè´¦é¢ä½™é¢"],
-            ["æœŸè´§åˆçº¦ä¿è¯é‡‘", "116,653,692.30", "32,918,039.90"],
-        ], page=312, unit="å…ƒ")
-        fair_value = parse_derivative_note_table([
-            ["é¡¹ç›®", "å¹´æœ«å…¬å…ä»·å€¼", None, None, None],
-            [None, "ç¬¬ä¸€å±‚æ¬¡", "ç¬¬äºŒå±‚æ¬¡", "ç¬¬ä¸‰å±‚æ¬¡", "åˆè®¡"],
-            ["ï¼ˆä¸€ï¼‰äº¤æ˜“æ€§é‡‘èèµ„äº§", "182,227,655.19", "", "186,776,727.57", "369,004,382.76"],
-            ["ï¼ˆ5ï¼‰è¡ç”Ÿé‡‘èå·¥å…·", "8,305,380.00", "", "", "8,305,380.00"],
-            ["ï¼ˆäº”ï¼‰äº¤æ˜“æ€§é‡‘èè´Ÿå€º", "11,453,070.00", "", "12,072,387.97", "23,525,457.97"],
-            ["ï¼ˆ2ï¼‰è¡ç”Ÿé‡‘èå·¥å…·", "11,453,070.00", "", "", "11,453,070.00"],
-        ], page=376, unit="å…ƒ")
-        pnl = parse_derivative_note_table([
-            ["äº§ç”Ÿå…¬å…ä»·å€¼å˜åŠ¨æ”¶ç›Šçš„æ¥æº", "æœ¬å¹´å‘ç”Ÿé¢", "ä¸Šå¹´å‘ç”Ÿé¢"],
-            ["è¡ç”Ÿé‡‘èå·¥å…·äº§ç”Ÿçš„å…¬å…ä»·å€¼å˜åŠ¨", "-14,780,760.00", "9,669,520.00"],
-        ], page=353, unit="å…ƒ")
-
-        self.assertEqual(
-            [(item["metric_type"], item["value"]) for item in margin],
-            [("margin_end_cash", 116653692.30)],
-        )
-        self.assertEqual(
-            [(item["metric_type"], item["value"]) for item in fair_value],
-            [
-                ("derivative_asset_fv", 8305380.00),
-                ("derivative_liability_fv", 11453070.00),
-            ],
-        )
-        self.assertEqual(
-            [(item["metric_type"], item["value"]) for item in pnl],
-            [("derivative_fv_change_pnl", -14780760.00)],
-        )
-
-    def test_note_table_extracts_named_derivative_investment_income(self):
-        metrics = parse_derivative_note_table([
-            ["é»„é‡‘T+Dã€ç™½é“¶T+D äº¤æ˜“æŠ•èµ„æ”¶ç›Š", "-124,564,900.58", "-52,753,894.76"],
-            ["ç†è´¢äº§å“æŠ•èµ„æ”¶ç›Š", "11,761,438.05", "17,220,536.22"],
-            ["åˆè®¡", "-112,393,163.93", "-36,721,157.06"],
-        ], page=143, unit="å…ƒ")
-
-        self.assertEqual(
-            [(item["metric_type"], item["value"], item["account_name"]) for item in metrics],
-            [(
-                "derivative_disposal_investment_income",
-                -124564900.58,
-                "é»„é‡‘T+Dã€ç™½é“¶T+Däº¤æ˜“æŠ•èµ„æ”¶ç›Š",
-            )],
-        )
-
-    def test_note_table_extracts_cash_flow_hedge_reserve_columns(self):
-        metrics = parse_derivative_note_table([
-            ["é¡¹ç›®", "æœŸåˆä½™é¢", "æœ¬æœŸå‘ç”Ÿé¢", None, None, None, None, None, "æœŸæœ«ä½™é¢"],
-            [None, None, "æœ¬æœŸæ‰€å¾—ç¨å‰å‘ç”Ÿé¢", "å‡ï¼šå‰æœŸè®¡å…¥å…¶ä»–ç»¼åˆæ”¶ç›Šå½“æœŸè½¬å…¥æŸç›Š",
-             None, "å‡ï¼šæ‰€å¾—ç¨è´¹ç”¨", "ç¨åå½’å±äºæ¯å…¬å¸", None, None],
-            ["ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡", "-2,219,839.96", "291,500.00", "-2,646,800.00",
-             "", "445,535.00", "2,492,765.00", "", "272,925.04"],
-        ], page=171, unit="å…ƒ")
-
-        self.assertEqual(
-            [(item["metric_type"], item["value"]) for item in metrics],
-            [("oci_amount", 291500.00), ("reclassification_amount", -2646800.00)],
-        )
-
-    def test_fair_value_continuation_extracts_derivative_liability_total(self):
-        metrics = parse_derivative_note_table([
-            ["é¡¹ç›®", "æœŸæœ«å…¬å…ä»·å€¼", None, None, None],
-            [None, "ç¬¬ä¸€å±‚æ¬¡", "ç¬¬äºŒå±‚æ¬¡", "ç¬¬ä¸‰å±‚æ¬¡", "åˆè®¡"],
-            ["æŒç»­ä»¥å…¬å…ä»·å€¼è®¡é‡çš„èµ„äº§æ€»é¢", "24,456,135.00", "1,336,477,688.59", "", "1,863,590,284.88"],
-            ["ï¼ˆäº”ï¼‰è¡ç”Ÿé‡‘èè´Ÿå€º", "", "", "", ""],
-            ["1.æœŸè´§åŠæœŸæƒè¡ç”Ÿå·¥å…·", "27,564,486.13", "", "", "27,564,486.13"],
-            ["2.å¤–æ±‡è¡ç”Ÿå·¥å…·", "", "28,564,260.48", "", "28,564,260.48"],
-            ["æŒç»­ä»¥å…¬å…ä»·å€¼è®¡é‡çš„è´Ÿå€ºæ€»é¢", "27,564,486.13", "28,564,260.48", "", "56,128,746.61"],
-        ], page=261, unit="å…ƒ")
-
-        self.assertEqual(
-            [(item["metric_type"], item["value"]) for item in metrics],
-            [("derivative_liability_fv", 56128746.61)],
-        )
-
-    def test_each_table_uses_the_nearest_preceding_unit(self):
-        blocks = [
-            (0, 10, 100, 20, "å•ä½ï¼šå…ƒ å¸ç§ï¼šäººæ°‘å¸", 0, 0),
-            (0, 200, 100, 210, "å•ä½ï¼šä¸‡å…ƒ å¸ç§ï¼šäººæ°‘å¸", 0, 0),
-        ]
-
-        self.assertEqual(unit_before_table(blocks, table_top=100, page_text=""), "å…ƒ")
-        self.assertEqual(unit_before_table(blocks, table_top=250, page_text=""), "ä¸‡å…ƒ")
-
-    def test_parent_company_note_start_is_detected(self):
-        self.assertEqual(find_parent_company_note_start([
-            "åˆå¹¶è´¢åŠ¡æŠ¥è¡¨é¡¹ç›®æ³¨é‡Š",
-            "åä¹ã€æ¯å…¬å¸è´¢åŠ¡æŠ¥è¡¨ä¸»è¦é¡¹ç›®æ³¨é‡Š",
-            "æŠ•èµ„æ”¶ç›Š",
-        ]), 2)
-
-    def test_marked_text_keeps_every_candidate_page_and_late_focus_term(self):
-        pages = [
-            ("æ™®é€šå†…å®¹" * 1500) + term
-            for term in ("å¥—æœŸä¿å€¼", "å…¬å…ä»·å€¼å˜åŠ¨æŸç›Š", "è¡ç”Ÿé‡‘èè´Ÿå€º", "ä¿è¯é‡‘")
-        ]
-
-        marked = build_marked_text(
-            pages,
-            [1, 2, 3, 4],
-            ["å¥—æœŸä¿å€¼", "å…¬å…ä»·å€¼å˜åŠ¨æŸç›Š", "è¡ç”Ÿé‡‘èè´Ÿå€º", "ä¿è¯é‡‘"],
-        )
-
-        self.assertLessEqual(len(marked), MAX_MARKED_CHARS)
-        self.assertTrue(all(f"ã€P{page}ã€‘" in marked for page in range(1, 5)))
-        self.assertTrue(all(term in marked for term in (
-            "å¥—æœŸä¿å€¼", "å…¬å…ä»·å€¼å˜åŠ¨æŸç›Š", "è¡ç”Ÿé‡‘èè´Ÿå€º", "ä¿è¯é‡‘",
-        )))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        }, "ã€P31ã€‘å•†å“æœŸè´§å¥—æœŸä¿å€¼ä¸šåŠ¡ä»»æ„æ—¶ç‚¹ä¿è¯é‡‘æœ€é«˜å ç”¨×}»ÒÚ$z{-®éÜj×¢FVbFW7EöÆö6F÷%÷&W6W'fW5ö7GVÅö66÷VçF–æuöæE÷7V6–f–5öf–ææ6–Åöæ÷FW2‡6VÆb“ ¢vW2Ò².ZY~iÉşKùŞXÂŠŞyIşY8h©^‹XB"¢‚f÷"ò–â&ævRƒ#•Ğ¢vW2æW‡FVæB…°¢.XZÎXûiÊ®[©NyJZY~iÉşKÉ®Šêy¨NXéşYºiŠşKªNi‰>iÉş™™‹è>yúÒ"À¢.ŠŞyIş˜y‰èŞ[z^X[~‹XNKª~iÉşiÊ¾KÙš)Ó‚Ã3RÃ3ƒXX2"À¢.ŠŞyIş˜y‰èŞ[z^X[~‹IşX®iÉşiÊ¾KÙš)ÓÃCS2ÃsXX2"À¢.ŠŞyIş˜y‰èŞ[z^X[~Kª~yIşy¨NXZÎXXK»~XÎXùXªiKny¸®K‹¢ÓBÃsƒÃscXX2"À¢.iÉş‹J~Y{ªnKùŞŠø˜yiÉşiÊ¾KÙš)ÓbÃcS2Ãc“"ã3XX2"À¢Ò ¢6VÆV7FVBÂòÂòÒ6VÆV7Eö6æF–FFU÷vW2‡vW2 ¢6VÆbæ76W'EG'VR‡³#Â#"Â#2Â#BÂ#WÒæ—77V'6WB‡6WB‡6VÆV7FVB’’ ¢FVbFW7EöÆö6F÷%÷&W6W'fW5ö66…öfÆ÷uö†VFvU÷&W6W'fU÷vR‡6VÆb“ ¢vW2Ò².ZY~iÉşKùŞXÂŠŞyIşY8h©^‹XB"¢‚f÷"ò–â&ævRƒ#•Ğ¢vW2æW‡FVæB…°¢.KÉ®ŠêiKşzÙbxë˜ykX˜xşZY~iÉşX*ZHr"¢RÀ¢.išî˜	®{¸ş‰
+^Xh^Zë’"À¢.xë˜ykX˜xşZY~iÉşX*ZHuÆîiÊÎiÉşh˜[é~zˆîX˜ÕÆîXùyIşš)Ó#“ÃSXX2"À¢Ò ¢6VÆV7FVBÂòÂòÒ6VÆV7Eö6æF–FFU÷vW2‡vW2 ¢6VÆbæ76W'D–âƒ#2Â6VÆV7FVB ¢FVbFW7E÷7FæF&EöFW&—fF—fU÷F&ÆUö¶VW5öw&VUö6öÇVÖåöÖVæ–ær‡6VÆb“ ¢&÷w2Ò°¢°¢.ŠŞyIşY8h©^‹XN{¾Yè²"Â.X‰ŞZx¾h©^‹XN˜yš)Ò"Â.iÉşX‰Ş˜yš)Ò"Â.iÊÎiÉşXZÎXXK»~XÅÆîXùXªhÙşy¸¢"À¢.ŠêXZ^iØ>y¸®y¨N{JşŠêÆîXZÎXXK»~XÎXùXª‚"Â.hª^Y®iÉşXh^‹JÕÆîXZ^˜yš)Ò"Â.hª^Y®iÉşXh^YJåÆîX{®˜yš)Ò"À¢.iÉşiÊ¾˜yš)Ò"Â.iÉşiÊ¾h©^‹XN˜yš)ŞXÚÆîXZÎXûhª^Y®iÉşiÊ¾XxÆî‹XNKª~jùNKè²"À¢ÒÀ¢².iÉş‹J~ZY~KùŞY{ªb"Â#"ÃCsã""Â#"ÃCsã""Â#2ÃSCBãC’"Â##’ãR"Â""Â""Â#bÃRãS"Â#ãBR%ÒÀ¢².‹ùÎiÉş˜y‰èŞY{ªb"Â"ÓrÃsBãr"Â"ÓrÃsBãr"Â#Ã3ƒbãC"Â""Â""Â""Â"ÓbÃS’ãS"Â"ÓãBR%ÒÀ¢².YŠê"Â"ÓBÃc2ãR"Â"ÓBÃc2ãR"Â#2Ã“3ã“"Â##’ãR"Â""Â""Â"ÓC“2ã“’"Â#ãR%ÒÀ¢Ğ ¢ÖWG&–72Ò'6UöFW&—fF—fUö–çfW7FÖVçE÷F&ÆR‡&÷w2ÂvSÓ3RÂVæ—CÒ.Kˆ~XX2" ¢6VÆbæ76W'DWVÂ…°¢†—FVÕ²&ÖWG&–5÷G—R%ÒÂ—FVÕ²'66÷R%ÒÂ—FVÕ²'fÇVR%Ò¢f÷"—FVÒ–âÖWG&–70¢ÒÂ°¢‚&FW&—fF—fUögeö6†ævU÷æÂ"Â.YXnY8"Â3SCBãC’’À¢‚&ö6•öÖ÷VçB"Â.YXnY8"Â#’ãR’À¢‚&VæF–æuö&Ææ6R"Â.YXnY8"ÂcRãS’À¢‚&æWEö76WE÷&F–ò"Â.YXnY8"ÂãB’À¢‚&FW&—fF—fUögeö6†ævU÷æÂ"Â.ZInkr"Â3ƒbãC’À¢‚&VæF–æuö&Ææ6R"Â.ZInkr"ÂÓcS’ãS’À¢‚&æWEö76WE÷&F–ò"Â.ZInkr"ÂÓãB’À¢Ò¢6VÆbæ76W'Dæ÷D–â‚'W&–öE÷W&6†6UöÖ÷VçB"Â°¢—FVÕ²&ÖWG&–5÷G—R%Òf÷"—FVÒ–âÖWG&–70¢Ò¢6VÆbæ76W'EG'VR†ÆÂ†—FVÕ²'F&ÆUö6VÆÅ÷fW&–f–VB%Òf÷"—FVÒ–âÖWG&–72’ ¢FVbFW7E÷7FæF&EöFW&—fF—fU÷F&ÆUöW‡G&7G5öF&å÷G&ç67F–öç2‡6VÆb“ ¢&÷w2Ò°¢°¢.ŠŞyIşY8h©^‹XN{¾Yè²"Â.X‰ŞZx¾h©^‹XN˜yš)Ò"Â.iÉşX‰Ş˜yš)Ò"Â.iÊÎiÉşXZÎXXK»~XÎXùXªhÙşy¸¢"À¢.ŠêXZ^iØ>y¸®y¨N{JşŠêXZÎXXK»~XÎXùXª‚"Â.hª^Y®iÉşXh^‹JŞXZ^˜yš)Ò"Â.hª^Y®iÉşXh^YJîX{®˜yš)Ò"À¢.iÉşiÊ¾˜yš)Ò"Â.iÉşiÊ¾h©^‹XN˜yš)ŞXÚXZÎXûhª^Y®iÉşiÊ¾Xx‹XNKª~jùNKè²"À¢ÒÀ¢².iÉş‹Jr"Â""Â#BÃCSRã"Â"ÓÃCs‚ã‚"Â""Â#“"Ã“’ãƒ"Â#ƒBÃƒs‚ãƒ’"Â#Ã3Sãb"Â#ãrR%ÒÀ¢Ğ ¢ÖWG&–72Ò'6UöFW&—fF—fUö–çfW7FÖVçE÷F&ÆR‡&÷w2ÂvSÓ3RÂVæ—CÒ.Kˆ~XX2" ¢6VÆbæ76W'DWVÂ‡°¢—FVÕ²&ÖWG&–5÷G—R%Ó¢—FVÕ²'fÇVR%Òf÷"—FVÒ–âÖWG&–70¢ÒÂ°¢&FW&—fF—fUögeö6†ævU÷æÂ#¢ÓCs‚ã‚À¢'W&–öE÷W&6†6UöÖ÷VçB#¢“#“’ãƒÀ¢'W&–öE÷6ÆUöÖ÷VçB#¢ƒCƒs‚ãƒ’À¢&VæF–æuö&Ææ6R#¢3SãbÀ¢&æWEö76WE÷&F–ò#¢ãrÀ¢Ò ¢FVbFW7E÷7FæF&EöFW&—fF—fU÷F&ÆUöW‡G&7G5öW‡Æ–6—Eö–çfW7FÖVçEö–æ6öÖR‡6VÆb“ ¢&÷w2Ò°¢°¢.ŠŞyIşY8h©^‹XN{¾Yè²"Â.iÉşX‰Şh©^‹XN˜yš)Ò"Â.iÊÎiÉşXZÎXXK»~XÎXùXªhÙşy¸¢"À¢.h©^‹XNiKny¸¢"Â.iÉşiÊ¾˜yš)Ò"Â.iÉşiÊ¾h©^‹XN˜yš)ŞXÚXZÎXûhª^Y®iÉşiÊ¾Xx‹XNKª~jùNKè²"À¢ÒÀ¢².YXnY8ŠŞyIşY8"Â#3"ÃRãc"Â"Ó2ÃSC"ãCB"Â#bÃSƒrãC""Â#crÃc“"ã3""Â#ãsrR%ÒÀ¢².ZInk~ŠŞyIşY8"Â#ã"Â#ã"Â#cBã#B"Â#ã"Â#ãR%ÒÀ¢Ğ ¢ÖWG&–72Ò'6UöFW&—fF—fUö–çfW7FÖVçE÷F&ÆR‡&÷w2ÂvSÓ32ÂVæ—CÒ.Kˆ~XX2" ¢6VÆbæ76W'DWVÂ…°¢†—FVÕ²'66÷R%ÒÂ—FVÕ²'fÇVR%ÒÂ—FVÕ²'Væ—B%Ò¢f÷"—FVÒ–âÖWG&–70¢–b—FVÕ²&ÖWG&–5÷G—R%ÒÓÒ&FW&—fF—fUöF—7÷6Åö–çfW7FÖVçEö–æ6öÖR ¢ÒÂ°¢‚.YXnY8"ÂcSƒrãC"Â.Kˆ~XX2"’À¢‚.ZInkr"ÂcBã#BÂ.Kˆ~XX2"’À¢Ò ¢FVbFW7E÷7FæF&EöFW&—fF—fU÷F&ÆUö¶VW5ö†VFv–æuö'W6–æW75÷&÷w2‡6VÆb“ ¢&÷w2Ò°¢°¢.ŠŞyIşY8h©^‹XN{¾Yè²"Â.X‰ŞZx¾h©^‹XN˜yš)Ò"Â.iÉşX‰Ş˜yš)Ò"Â.iÊÎiÉşXZÎXXK»~XÎXùXªhÙşy¸¢"À¢.ŠêXZ^iØ>y¸®y¨N{JşŠêXZÎXXK»~XÎXùXª‚"Â.hª^Y®iÉşXh^‹JŞXZ^˜yš)Ò"Â.hª^Y®iÉşXh^YJîX{®˜yš)Ò"À¢.iÉşiÊ¾˜yš)Ò"Â.iÉşiÊ¾h©^‹XN˜yš)ŞXÚXZÎXûhª^Y®iÉşiÊ¾Xx‹XNKª~jùNKè²"À¢ÒÀ¢°¢.YXnY8iÉş‹J~ZY~iÉşKùŞXÂ"Â""Â#ƒcRãƒ2"Â"Ó#ƒrã3b"Â""À¢#‚ÃScrãƒr"Â#ÃãC"Â#sSbãc"Â#ã#R"À¢ÒÀ¢Ğ ¢ÖWG&–72Ò'6UöFW&—fF—fUö–çfW7FÖVçE÷F&ÆR‡&÷w2ÂvSÓC’ÂVæ—CÒ.Kˆ~XX2" ¢6VÆbæ76W'DWVÂ‡°¢—FVÕ²&ÖWG&–5÷G—R%Ó¢—FVÕ²'fÇVR%Òf÷"—FVÒ–âÖWG&–70¢ÒÂ°¢&FW&—fF—fUögeö6†ævU÷æÂ#¢Ó#ƒrã3bÀ¢'W&–öE÷W&6†6UöÖ÷VçB#¢ƒScrãƒrÀ¢'W&–öE÷6ÆUöÖ÷VçB#¢ãCÀ¢&VæF–æuö&Ææ6R#¢sSbãcÀ¢&æWEö76WE÷&F–ò#¢ã#À¢Ò ¢FVbFW7E÷7FæF&EöFW&—fF—fU÷F&ÆUö†æFÆW5÷7'6Uö×VÇF–Æ–æUö†VFW'2‡6VÆb“ ¢&÷w2Ò°¢°¢""ÂæöæRÂæöæRÂ""ÂæöæRÂæöæRÂ""ÂæöæRÂ""Â.iÊÎiÉşXZÂ"À¢""Â.ŠêXZ^iØ2"Â""ÂæöæRÂ.hª^Y®iÉşXh^‹JÒ"ÂæöæRÀ¢.hª^Y®iÉşXh^YJâ"ÂæöæRÂæöæRÂ.iÉşiÊ¾˜yš)Ò"Â.iÉşiÊ¾h©^‹XB"ÂæöæRÀ¢ÒÀ¢°¢""Â.ŠŞyIşY8h©^‹XN{²"ÂæöæRÂ""Â.X‰ŞZx¾h©^‹XN˜y"ÂæöæRÀ¢.iÉşX‰Ş˜yš)Ò"ÂæöæRÂ""Â.XXK»~XÎXùXªhÙşy¸¢"ÂæöæRÀ¢.y¸®y¨N{JşŠêXZÎXXK»~XÎXùXª‚"ÂæöæRÂæöæRÂ.XZ^˜yš)Ò"ÂæöæRÀ¢.X{®˜yš)Ò"ÂæöæRÂæöæRÂæöæRÂ.˜yš)ŞXÚXZÎXûhª^Y®iÉşiÊ¾Xx‹XNKª~jùNKè²"ÂæöæRÀ¢ÒÀ¢°¢.YXnY8ZY~iÉşKùŞXÂ"ÂæöæRÂæöæRÂ#ƒcRãƒ2"ÂæöæRÂæöæRÀ¢#ƒcRãƒ2"ÂæöæRÂ"Ó#ƒrã3b"ÂæöæRÂæöæRÂ#"ÂæöæRÀ¢æöæRÂ#‚ÃScrãƒr"ÂæöæRÂ#ÃãB"ÂæöæRÂæöæRÀ¢#sSbãc"Â#ã#R"ÂæöæRÀ¢ÒÀ¢Ğ ¢ÖWG&–72Ò'6UöFW&—fF—fUö–çfW7FÖVçE÷F&ÆR‡&÷w2ÂvSÓC’ÂVæ—CÒ.Kˆ~XX2" ¢6VÆbæ76W'DWVÂ‡°¢—FVÕ²&ÖWG&–5÷G—R%Ó¢—FVÕ²'fÇVR%Òf÷"—FVÒ–âÖWG&–70¢ÒÂ°¢&FW&—fF—fUögeö6†ævU÷æÂ#¢Ó#ƒrã3bÀ¢&ö6•öÖ÷VçB#¢ãÀ¢'W&–öE÷W&6†6UöÖ÷VçB#¢ƒScrãƒrÀ¢'W&–öE÷6ÆUöÖ÷VçB#¢ãCÀ¢&VæF–æuö&Ææ6R#¢sSbãcÀ¢&æWEö76WE÷&F–ò#¢ã#À¢Ò ¢FVbFW7E÷7FæF&EöFW&—fF—fU÷F&ÆUö66WG5ö&ööµ÷fÇVUö†VFW%÷f&–çB‡6VÆb“ ¢ÖWG&–72Ò'6UöFW&—fF—fUö–çfW7FÖVçE÷F&ÆR…°¢°¢.ŠŞyIşY8h©^‹XN{¾Yè²"Â.X‰ŞZx¾h©^‹XN˜yš)Ò"Â.iÉşX‰Ş‹Jn™Ú.K»~XÂ"Â.iÊÎiÉşXZÎXXK»~XÎXùXªhÙşy¸¢"À¢.ŠêXZ^iØ>y¸®y¨N{JşŠêXZÎXXK»~XÎXùXª‚"Â.hª^Y®iÉşXh^‹JŞXZ^˜yš)Ò"Â.hª^Y®iÉşXh^YJîX{®˜yš)Ò"À¢.iÉşiÊ¾‹Jn™Ú.K»~XÂ"Â.iÉşiÊ¾‹Jn™Ú.K»~XÎXÚXZÎXûhª^Y®iÉşiÊ¾Xx‹XNKª~jùNKè¾ûÈ‚^ûÈ’"À¢ÒÀ¢².išî˜	®‹ùÎiÉò"Â""Â#’Ãƒ#RãcR"Â"Ó’ÃƒsRãC"Â""Â##2Ã#Rã’"Â##RÃCãc‚"Â"Ó"Ãcbã#B"Â"Óã’%ÒÀ¢ÒÂvSÓC2ÂVæ—CÒ.Kˆ~XX2" ¢6VÆbæ76W'DWVÂ‡°¢—FVÕ²&ÖWG&–5÷G—R%Ó¢—FVÕ²'fÇVR%Òf÷"—FVÒ–âÖWG&–70¢ÒÂ°¢&FW&—fF—fUögeö6†ævU÷æÂ#¢Ó“ƒsRãCÀ¢'W&–öE÷W&6†6UöÖ÷VçB#¢#3#Rã’À¢'W&–öE÷6ÆUöÖ÷VçB#¢#SCãc‚À¢&VæF–æuö&Ææ6R#¢Ó#cbã#BÀ¢&æWEö76WE÷&F–ò#¢Óã’À¢Ò ¢FVbFW7Eöæ÷FU÷F&ÆW5öW‡G&7EöÖ&v–å÷÷6—F–öç5öæE÷æÅö6ö×öæVçG2‡6VÆb“ ¢Ö&v–âÒ'6UöFW&—fF—fUöæ÷FU÷F&ÆR…°¢².jËîšh
+~‹J‚"Â.[›NiÊ¾‹Jn™Ú.KÙš)Ò"Â.[›NX‰Ş‹Jn™Ú.KÙš)Ò%ÒÀ¢².iÉş‹J~Y{ªnKùŞŠø˜y"Â#bÃcS2Ãc“"ã3"Â#3"Ã“‚Ã3’ã“%ÒÀ¢ÒÂvSÓ3"ÂVæ—CÒ.XX2"¢f—%÷fÇVRÒ'6UöFW&—fF—fUöæ÷FU÷F&ÆR…°¢².šyºâ"Â.[›NiÊ¾XZÎXXK»~XÂ"ÂæöæRÂæöæRÂæöæUÒÀ¢´æöæRÂ.zÊÎKˆ[.jÊ"Â.zÊÎK¨Î[.jÊ"Â.zÊÎKˆ[.jÊ"Â.YŠê%ÒÀ¢².ûÈKˆûÈKªNi‰>h
+~˜y‰èŞ‹XNKªr"Â#ƒ"Ã##rÃcSRã’"Â""Â#ƒbÃssbÃs#rãSr"Â#3c’ÃBÃ3ƒ"ãsb%ÒÀ¢².ûÈƒ^ûÈŠŞyIş˜y‰èŞ[z^X[r"Â#‚Ã3RÃ3ƒã"Â""Â""Â#‚Ã3RÃ3ƒã%ÒÀ¢².ûÈK©NûÈKªNi‰>h
+~˜y‰èŞ‹IşX¢"Â#ÃCS2Ãsã"Â""Â#"Ãs"Ã3ƒrã“r"Â##2ÃS#RÃCSrã“r%ÒÀ¢².ûÈƒ.ûÈŠŞyIş˜y‰èŞ[z^X[r"Â#ÃCS2Ãsã"Â""Â""Â#ÃCS2Ãsã%ÒÀ¢ÒÂvSÓ3sbÂVæ—CÒ.XX2"¢æÂÒ'6UöFW&—fF—fUöæ÷FU÷F&ÆR…°¢².Kª~yIşXZÎXXK»~XÎXùXªiKny¸®y¨NiÚ^k©"Â.iÊÎ[›NXùyIşš)Ò"Â.Kˆ®[›NXùyIşš)Ò%ÒÀ¢².ŠŞyIş˜y‰èŞ[z^X[~Kª~yIşy¨NXZÎXXK»~XÎXùXª‚"Â"ÓBÃsƒÃscã"Â#’Ãcc’ÃS#ã%ÒÀ¢ÒÂvSÓ3S2ÂVæ—CÒ.XX2" ¢6VÆbæ76W'DWVÂ€¢²†—FVÕ²&ÖWG&–5÷G—R%ÒÂ—FVÕ²'fÇVR%Ò’f÷"—FVÒ–âÖ&v–åÒÀ¢²‚&Ö&v–åöVæEö66‚"ÂccS3c“"ã3•ÒÀ¢¢6VÆbæ76W'DWVÂ€¢²†—FVÕ²&ÖWG&–5÷G—R%ÒÂ—FVÕ²'fÇVR%Ò’f÷"—FVÒ–âf—%÷fÇVUÒÀ¢°¢‚&FW&—fF—fUö76WEögb"Âƒ3S3ƒã’À¢‚&FW&—fF—fUöÆ–&–Æ—G•ögb"ÂCS3sã’À¢ÒÀ¢¢6VÆbæ76W'DWVÂ€¢²†—FVÕ²&ÖWG&–5÷G—R%ÒÂ—FVÕ²'fÇVR%Ò’f÷"—FVÒ–âæÅÒÀ¢²‚&FW&—fF—fUögeö6†ævU÷æÂ"ÂÓCsƒscã•ÒÀ¢ ¢FVbFW7Eöæ÷FU÷F&ÆUöW‡G&7G5öæÖVEöFW&—fF—fUö–çfW7FÖVçEö–æ6öÖR‡6VÆb“ ¢ÖWG&–72Ò'6UöFW&—fF—fUöæ÷FU÷F&ÆR…°¢².›¸N˜yB´N8y›Ş™;eB´BKªNi‰>h©^‹XNiKny¸¢"Â"Ó#BÃScBÃ“ãS‚"Â"ÓS"ÃsS2Ãƒ“Bãsb%ÒÀ¢².yn‹J.Kª~Y8h©^‹XNiKny¸¢"Â#ÃscÃC3‚ãR"Â#rÃ##ÃS3bã#"%ÒÀ¢².YŠê"Â"Ó"Ã3“2Ãc2ã“2"Â"Ó3bÃs#ÃSrãb%ÒÀ¢ÒÂvSÓC2ÂVæ—CÒ.XX2" ¢6VÆbæ76W'DWVÂ€¢²†—FVÕ²&ÖWG&–5÷G—R%ÒÂ—FVÕ²'fÇVR%ÒÂ—FVÕ²&66÷VçEöæÖR%Ò’f÷"—FVÒ–âÖWG&–75ÒÀ¢²€¢&FW&—fF—fUöF—7÷6Åö–çfW7FÖVçEö–æ6öÖR"À¢Ó#CScC“ãS‚À¢.›¸N˜yB´N8y›Ş™;eB´NKªNi‰>h©^‹XNiKny¸¢"À¢•ÒÀ¢ ¢FVbFW7E÷&ö×E÷7FFW5öÖ&v–åöæEöæöåö†VFvUöFW&—fF—fUö&÷VæF&–W2‡6VÆb“ ¢ÖW76vW2Ò'V–ÆEöÖWG&–5öÖW76vW2€¢'÷6—F–öâ"À¢.iùXZÎXûƒ##^[›N[›N[ªnhª^Y¢"À¢.iùXZÎXû‚"À¢#c"À¢###Te’"À¢.8	8	›¸N˜yzyş‹XKùŞŠø˜yKˆ~XX2"À¢¢&ö×E÷FW‡BÒ%Æâ"æ¦ö–â‡7G"†—FVÒævWB‚&6öçFVçB"’÷"""’f÷"—FVÒ–âÖW76vW2 ¢6VÆbæ76W'D–â‚.›¸N˜yzyş‹XKùŞŠø˜y"Â&ö×E÷FW‡B¢6VÆbæ76W'D–â‚.KˆŞ[é~KÙÎK‹®ŠŞyIşY8KùŞŠø˜y"Â&ö×E÷FW‡B ¢æÅöÖW76vW2Ò'V–ÆEöÖWG&–5öÖW76vW2€¢'æÂ"À¢.iùXZÎXûƒ##^[›N[›N[ªnhª^Y¢"À¢.iùXZÎXû‚"À¢#c"À¢###Te’"À¢.8	#8	ŠŞyIş˜y‰èŞ[z^X[~XZÎXXK»~XÎXùXªiKny¸£Kˆ~XX2"À¢¢æÅ÷FW‡BÒ%Æâ"æ¦ö–â‡7G"†—FVÒævWB‚&6öçFVçB"’÷"""’f÷"—FVÒ–âæÅöÖW76vW2¢6VÆbæ76W'D–â‚.KˆŞˆ;ŞXÙ^xºÎŠøiˆî[îK¨îZY~iÉşKùŞXÎZéî™˜^hÙşy¸¢"ÂæÅ÷FW‡B¢6VÆbæ76W'D–â‚%B´B"ÂæÅ÷FW‡B ¢FVbFW7Eöæ÷FU÷F&ÆUöW‡G&7G5ö66…öfÆ÷uö†VFvU÷&W6W'fUö6öÇVÖç2‡6VÆb“ ¢ÖWG&–72Ò'6UöFW&—fF—fUöæ÷FU÷F&ÆR…°¢².šyºâ"Â.iÉşX‰ŞKÙš)Ò"Â.iÊÎiÉşXùyIşš)Ò"ÂæöæRÂæöæRÂæöæRÂæöæRÂæöæRÂ.iÉşiÊ¾KÙš)Ò%ÒÀ¢´æöæRÂæöæRÂ.iÊÎiÉşh˜[é~zˆîX˜ŞXùyIşš)Ò"Â.XxşûÉ®X˜ŞiÉşŠêXZ^X[nK¹n{»ÎYiKny¸®[Ù>iÉş‹ÚÎXZ^hÙşy¸¢"À¢æöæRÂ.XxşûÉ®h˜[é~zˆî‹KyJ‚"Â.zˆîYî[Ù.[îK¨îjøŞXZÎXû‚"ÂæöæRÂæöæUÒÀ¢².xë˜ykX˜xşZY~iÉşX*ZHr"Â"Ó"Ã#’Ãƒ3’ã“b"Â##“ÃSã"Â"Ó"ÃcCbÃƒã"À¢""Â#CCRÃS3Rã"Â#"ÃC“"ÃscRã"Â""Â##s"Ã“#RãB%ÒÀ¢ÒÂvSÓsÂVæ—CÒ.XX2" ¢6VÆbæ76W'DWVÂ€¢²†—FVÕ²&ÖWG&–5÷G—R%ÒÂ—FVÕ²'fÇVR%Ò’f÷"—FVÒ–âÖWG&–75ÒÀ¢²‚&ö6•öÖ÷VçB"Â#“Sã’Â‚'&V6Æ76–f–6F–öåöÖ÷VçB"ÂÓ#cCcƒã•ÒÀ¢ ¢FVbFW7Eöf—%÷fÇVUö6öçF–çVF–öåöW‡G&7G5öFW&—fF—fUöÆ–&–Æ—G•÷F÷FÂ‡6VÆb“ ¢ÖWG&–72Ò'6UöFW&—fF—fUöæ÷FU÷F&ÆR…°¢².šyºâ"Â.iÉşiÊ¾XZÎXXK»~XÂ"ÂæöæRÂæöæRÂæöæUÒÀ¢´æöæRÂ.zÊÎKˆ[.jÊ"Â.zÊÎK¨Î[.jÊ"Â.zÊÎKˆ[.jÊ"Â.YŠê%ÒÀ¢².hÈ{ºŞKº^XZÎXXK»~XÎŠê˜xşy¨N‹XNKª~h¾š)Ò"Â##BÃCSbÃ3Rã"Â#Ã33bÃCsrÃcƒ‚ãS’"Â""Â#Ãƒc2ÃS“Ã#ƒBãƒ‚%ÒÀ¢².ûÈK©NûÈŠŞyIş˜y‰èŞ‹IşX¢"Â""Â""Â""Â"%ÒÀ¢²#îiÉş‹J~Xø®iÉşiØ>ŠŞyIş[z^X[r"Â##rÃScBÃCƒbã2"Â""Â""Â##rÃScBÃCƒbã2%ÒÀ¢²#"îZInk~ŠŞyIş[z^X[r"Â""Â##‚ÃScBÃ#cãC‚"Â""Â##‚ÃScBÃ#cãC‚%ÒÀ¢².hÈ{ºŞKº^XZÎXXK»~XÎŠê˜xşy¨N‹IşX®h¾š)Ò"Â##rÃScBÃCƒbã2"Â##‚ÃScBÃ#cãC‚"Â""Â#SbÃ#‚ÃsCbãc%ÒÀ¢ÒÂvSÓ#cÂVæ—CÒ.XX2" ¢6VÆbæ76W'DWVÂ€¢²†—FVÕ²&ÖWG&–5÷G—R%ÒÂ—FVÕ²'fÇVR%Ò’f÷"—FVÒ–âÖWG&–75ÒÀ¢²‚&FW&—fF—fUöÆ–&–Æ—G•ögb"ÂSc#ƒsCbãc•ÒÀ¢ ¢FVbFW7EöV6…÷F&ÆU÷W6W5÷F†UöæV&W7E÷&V6VF–æu÷Væ—B‡6VÆb“ ¢&Æö6·2Ò°¢ƒÂÂÂ#Â.XÙ^KØŞûÉ®XX2[ˆzxŞûÉ®K«®k	[ˆ"ÂÂ’À¢ƒÂ#ÂÂ#Â.XÙ^KØŞûÉ®Kˆ~XX2[ˆzxŞûÉ®K«®k	[ˆ"ÂÂ’À¢Ğ ¢6VÆbæ76W'DWVÂ‡Væ—Eö&Vf÷&U÷F&ÆR†&Æö6·2ÂF&ÆU÷F÷ÓÂvU÷FW‡CÒ""’Â.XX2"¢6VÆbæ76W'DWVÂ‡Væ—Eö&Vf÷&U÷F&ÆR†&Æö6·2ÂF&ÆU÷F÷Ó#SÂvU÷FW‡CÒ""’Â.Kˆ~XX2" ¢FVbFW7E÷F&ÆU÷Væ—E÷7W÷'G5öÖ–ÆÆ–öå÷—Vâ‡6VÆb“ ¢&Æö6·2Ò°¢ƒÂÂÂ#Â.XÙ^KØŞûÉ®y›îKˆ~XX2[ˆzxŞûÉ®K«®k	[ˆ"ÂÂ’À¢Ğ ¢6VÆbæ76W'DWVÂ€¢Væ—Eö&Vf÷&U÷F&ÆR†&Æö6·2ÂF&ÆU÷F÷ÓÂvU÷FW‡CÒ""’À¢.y›îKˆ~XX2"À¢ ¢FVbFW7E÷&VçEö6ö×ç•öæ÷FU÷7F'Eö—5öFWFV7FVB‡6VÆb“ ¢6VÆbæ76W'DWVÂ†f–æE÷&VçEö6ö×ç•öæ÷FU÷7F'B…°¢.Y[›n‹J.Xªhª^Ššyºîk:˜x¢"À¢.XØK™Ş8jøŞXZÎXû‹J.Xªhª^ŠK‹¾Šhšyºîk:˜x¢"À¢.h©^‹XNiKny¸¢"À¢Ò’Â" ¢FVbFW7EöÖ&¶VE÷FW‡Eö¶VW5öWfW'•ö6æF–FFU÷vUöæEöÆFUöfö7W5÷FW&Ò‡6VÆb“ ¢vW2Ò°¢‚.išî˜	®Xh^Zë’"¢S’²FW&Ğ¢f÷"FW&Ò–â‚.ZY~iÉşKùŞXÂ"Â.XZÎXXK»~XÎXùXªhÙşy¸¢"Â.ŠŞyIş˜y‰èŞ‹IşX¢"Â.KùŞŠø˜y"¢Ğ ¢Ö&¶VBÒ'V–ÆEöÖ&¶VE÷FW‡B€¢vW2À¢³Â"Â2ÂEÒÀ¢².ZY~iÉşKùŞXÂ"Â.XZÎXXK»~XÎXùXªhÙşy¸¢"Â.ŠŞyIş˜y‰èŞ‹IşX¢"Â.KùŞŠø˜y%ÒÀ¢ ¢6VÆbæ76W'DÆW74WVÂ†ÆVâ†Ö&¶VB’ÂÔ…ôÔ$´TEô4„%2¢6VÆbæ76W'EG'VR†ÆÂ†b.8	·vWŞ8	"–âÖ&¶VBf÷"vR–â&ævRƒÂR’’¢6VÆbæ76W'EG'VR†ÆÂ‡FW&Ò–âÖ&¶VBf÷"FW&Ò–â€¢.ZY~iÉşKùŞXÂ"Â.XZÎXXK»~XÎXùXªhÙşy¸¢"Â.ŠŞyIş˜y‰èŞ‹IşX¢"Â.KùŞŠø˜y"À¢’’  ¦–bõöæÖUõòÓÒ%õöÖ–åõò# ¢Væ—GFW7BæÖ–â‚ 

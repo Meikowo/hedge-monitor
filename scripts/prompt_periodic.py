@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """定期报告套保披露结构化提示词。"""
 
-PROMPT_VERSION = "periodic-v2.3-tablecells"
+PROMPT_VERSION = "periodic-v2.4-reviewed-boundaries"
 
 METRIC_FAMILIES = {
     "operations": (
@@ -45,6 +45,9 @@ METRIC_FAMILY_GUIDANCE = {
 - reported_derivative_comprehensive_pnl：衍生品投资情况表，或“报告期实际损益情况”说明中直接披露的平仓与持仓损益合计/报告期损益合计。
 - derivative_disposal_investment_income：附注“投资收益”中处置衍生金融工具的金额。
 - derivative_fv_change_pnl：附注“公允价值变动损益”中衍生工具的金额。
+- 黄金/白银 T+D 等明确衍生交易的投资收益可记录；业务目的未明确时不得擅自写成套期保值。
+- 仅出现“衍生金融工具公允价值变动”不能单独证明属于套期保值实际损益；若报告没有
+  实际套保业务范围、工具或目的证据，保留事实但将披露判断交由复核。
 - oci_amount：其他综合收益或套期储备中明确归属于套期会计/衍生工具的金额。
 - reclassification_amount：套期储备重分类进损益或资产成本的金额。
 - 报表中的“—”或“-”表示无金额，不得输出为0；只有原文数字0才能输出0。
@@ -53,6 +56,8 @@ METRIC_FAMILY_GUIDANCE = {
 - derivative_asset_fv / derivative_liability_fv：期末衍生金融资产/负债总额，必须分列。
 - derivative_net_fv：仅在原文直接披露净额时记录，不得自行用资产减负债生成。
 - margin_end_cash：报告日期末保证金余额，并保留列示科目和受限状态。
+- 黄金租赁保证金、租借黄金质押款属于租赁/融资担保时，不得作为衍生品保证金；
+  只有明确写明期货、期权、远期、掉期、互换、结售汇或 T+D 交易保证金时才记录。
 - margin_peak_reported：仅限原文明示的报告期最高/最大/任意时点最高保证金；不得标成名义本金。
 - collateral_end_fair_value：期末抵押品公允价值。
 - credit_facility_used_end / option_premium_usage_peak：期末已用授信/期间最高权利金占用。
@@ -254,4 +259,3 @@ metric_type 只允许：{", ".join(allowed)}。
             title, name, code, report_period, body
         )},
     ]
-

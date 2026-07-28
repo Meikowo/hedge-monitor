@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cninfo
-from common import ROOT, log, sb_upsert, snapshot_csv, warn
+from common import ROOT, log, sb_update, sb_upsert, snapshot_csv, warn
 
 CATEGORY = {"annual": "category_ndbg_szsh", "semiannual": "category_bndbg_szsh"}
 
@@ -26,8 +26,36 @@ def load_sample(path: str) -> dict[str, dict]:
 def is_target_title(title: str, fiscal_year: int, report_type: str) -> bool:
     title = title or ""
     period_word = "年度报告" if report_type == "annual" else "半年度报告"
-    return (f"{fiscal_year}年{period_word}" in title and
-            not re.search(r"摘要|英文版|取消|提示性公告", title))
+    period_pattern = rf"{fiscal_year}年?{period_word}"
+    return (
+        re.search(period_pattern, title) is not None
+        and not re.search(r"摘要|英文版|取消|提示性公告", title)
+    )
+
+
+def choose_canonical_reports(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """同公司同期只保留修订优先、发布日期最新的一份报告。"""
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row["code"], []).append(row)
+    canonical: list[dict] = []
+    superseded: list[dict] = []
+    for code_rows in grouped.values():
+        selected = max(
+            code_rows,
+            key=lambda row: (
+                bool(row.get("is_revised")),
+                row.get("publish_date") or "",
+                row.get("report_id") or "",
+            ),
+        )
+        canonical.append(selected)
+        superseded.extend(
+            row for row in code_rows if row["report_id"] != selected["report_id"]
+        )
+    canonical.sort(key=lambda row: (row["code"], row.get("publish_date") or ""))
+    superseded.sort(key=lambda row: (row["code"], row.get("publish_date") or ""))
+    return canonical, superseded
 
 
 def main() -> None:
@@ -78,11 +106,20 @@ def main() -> None:
             found[row["report_id"]] = row
         if query_code:
             cninfo.polite_sleep()
-    rows = sorted(found.values(), key=lambda x: (x["code"], x["publish_date"] or ""))
+    rows, superseded = choose_canonical_reports(list(found.values()))
     covered = len({x["code"] for x in rows})
-    log(f"发现 {len(rows)} 份完整报告，覆盖 {covered}/{len(sample)} 家")
+    log(
+        f"发现 {len(rows)} 份规范报告，覆盖 {covered}/{len(sample)} 家；"
+        f"旧版/被修订版 {len(superseded)} 份"
+    )
     if args.write:
         sb_upsert("periodic_reports", rows, on_conflict="report_id")
+        for old in superseded:
+            sb_update(
+                "periodic_reports",
+                {"report_id": f"eq.{old['report_id']}"},
+                {"status": "skipped", "note": "同公司同期已有更新或修订版报告"},
+            )
         log("元数据已写入 periodic_reports")
     else:
         log("预览模式：未写数据库；确认后加 --write")

@@ -83,6 +83,14 @@ def pdf_to_marked_text(content: bytes) -> tuple[str, int]:
 
 
 # ----------------------------- LLM 调用与 JSON 容错 -----------------------------
+class NoJsonObjectError(ValueError):
+    """响应中没有可解析的 JSON；空正文/仅思考正文可安全重试。"""
+
+
+class IncompleteJsonError(ValueError):
+    """响应已经开始输出 JSON 但括号未闭合；同请求重试可能重复消耗。"""
+
+
 def extract_json_obj(raw: str) -> dict:
     """稳健提取JSON：剥离<think>块与Markdown围栏，再做括号配对扫描。"""
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
@@ -94,7 +102,7 @@ def extract_json_obj(raw: str) -> dict:
         pass
     start = raw.find("{")
     if start == -1:
-        raise ValueError(f"输出中无JSON对象。前300字: {raw[:300]}")
+        raise NoJsonObjectError(f"输出中无JSON对象。前300字: {raw[:300]}")
     depth, in_str, esc = 0, False, False
     for i in range(start, len(raw)):
         c = raw[i]
@@ -114,7 +122,7 @@ def extract_json_obj(raw: str) -> dict:
                 depth -= 1
                 if depth == 0:
                     return json.loads(raw[start:i + 1])
-    raise ValueError(f"JSON括号不配对。前300字: {raw[:300]}")
+    raise IncompleteJsonError(f"JSON括号不配对。前300字: {raw[:300]}")
 
 
 def thinking_extra_body(setting: str | None) -> dict:
@@ -122,7 +130,11 @@ def thinking_extra_body(setting: str | None) -> dict:
     return {"thinking": {"type": kind}}
 
 
-def call_llm(messages: list[dict]) -> dict:
+def call_llm(
+    messages: list[dict],
+    *,
+    thinking_setting: str | None = None,
+) -> dict:
     """MiniMax-M3（OpenAI兼容）。thinking 保持 adaptive，思考内容由解析层剥离。"""
     from openai import OpenAI
     client = OpenAI(api_key=env("LLM_API_KEY", required=True),
@@ -130,7 +142,10 @@ def call_llm(messages: list[dict]) -> dict:
     kwargs = dict(model=env("LLM_MODEL", "MiniMax-M3"), messages=messages,
                   temperature=float(env("LLM_TEMPERATURE", "1.0")),
                   max_tokens=int(env("LLM_MAX_TOKENS", "8000")))
-    kwargs["extra_body"] = thinking_extra_body(env("LLM_THINKING", "on"))
+    kwargs["extra_body"] = thinking_extra_body(
+        thinking_setting if thinking_setting is not None
+        else env("LLM_THINKING", "on")
+    )
     last = None
     for backoff in (0, 10, 40):
         if backoff:
@@ -160,11 +175,11 @@ def call_llm(messages: list[dict]) -> dict:
                 }
                 raise RuntimeError(f"LLM 返回空正文: {diagnostics}")
             return extract_json_obj(content)
-        except ValueError as e:
+        except IncompleteJsonError as e:
             raise RuntimeError(f"LLM JSON 不完整，停止同请求重试: {e}") from e
+        except NoJsonObjectError as e:
+            last = e
         except RuntimeError as e:
-            if str(e).startswith("LLM 返回空正文"):
-                raise
             last = e
         except Exception as e:
             last = e
