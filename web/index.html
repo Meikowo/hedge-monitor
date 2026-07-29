@@ -6,10 +6,10 @@
     <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="A 股上市公司套期保值事件与公告数据终端" />
     <title>Hedge Monitor · 套保事件</title>
-    <link rel="stylesheet" href="styles.css?v=20260729-1" />
-    <script src="config.js?v=20260729-1"></script>
-    <script src="app.js?v=20260729-1" defer></script>
-    <script type="module" src="periodic.js?v=20260729-1"></script>
+    <link rel="stylesheet" href="styles.css?v=20260729-2" />
+    <script src="config.js?v=20260729-2"></script>
+    <script src="app.js?v=20260729-2" defer></script>
+    <script type="module" src="periodic.js?v=20260729-2"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -214,7 +214,10 @@
                   <strong id="periodic-result-count">—</strong>
                   <span>一行表示公司 × 报告期 × 类别</span>
                 </div>
-                <span>公告与年报口径匹配将在 M5 启用</span>
+                <div class="periodic-toolbar-actions">
+                  <span>公告与年报口径匹配将在 M5 启用</span>
+                  <button class="button button--secondary export-button" id="periodic-export-button" type="button">导出当前结果</button>
+                </div>
               </div>
 
               <div id="periodic-loading" class="state-panel" hidden>

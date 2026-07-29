@@ -451,6 +451,7 @@ a { color: inherit; }
 .periodic-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 8px 11px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10px; }
 .periodic-toolbar div { display: flex; align-items: baseline; gap: 9px; }
 .periodic-toolbar strong { color: var(--text); font-size: 11px; }
+.periodic-toolbar .periodic-toolbar-actions { align-items: center; gap: 12px; }
 .periodic-table-scroll { max-height: calc(100vh - 260px); }
 .periodic-table { min-width: 2180px; }
 .periodic-table th { position: sticky; top: 0; z-index: 2; white-space: nowrap; }

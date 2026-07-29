@@ -31,18 +31,63 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function hasFiniteMetricValue(value) {
+  return value !== null
+    && value !== undefined
+    && String(value).trim() !== ""
+    && Number.isFinite(Number(value));
+}
+
+function aggregateCompatibleMetrics(candidates, isReportTotal) {
+  if (candidates.length < 2 || isReportTotal) return null;
+  const compatibilityFields = [
+    "metric_type",
+    "fact_level",
+    "scope",
+    "currency",
+    "unit",
+    "time_basis"
+  ];
+  const first = candidates[0];
+  const compatible = candidates.every((item) => (
+    hasFiniteMetricValue(item.value)
+    && compatibilityFields.every((field) => (item[field] ?? null) === (first[field] ?? null))
+  ));
+  const identities = candidates.map((item) => [
+    item.underlying,
+    item.account_name
+  ].filter(Boolean).join("|"));
+  const distinguishable = identities.every(Boolean) && new Set(identities).size === candidates.length;
+  if (!compatible || !distinguishable) return null;
+  const pages = unique(candidates.map((item) => item.page));
+  return {
+    ...first,
+    value: Math.round(candidates.reduce((sum, item) => sum + Number(item.value), 0) * 1e8) / 1e8,
+    underlying: null,
+    account_name: null,
+    raw_text: `${candidates.length} 项同口径事实合计`,
+    page: pages.length === 1 ? pages[0] : null,
+    items: candidates,
+    multipleCount: candidates.length,
+    isAggregated: true,
+    isReportTotal
+  };
+}
+
 function chooseMetric(items, scope) {
   const scoped = items.filter((item) => item.fact_level !== "report" && item.scope === scope);
   const exact = scoped.filter((item) => item.fact_level === "scope");
   const candidates = exact.length ? exact : scoped;
   if (candidates.length === 1) return { ...candidates[0], isReportTotal: false };
   if (candidates.length > 1) {
-    return { items: candidates, multipleCount: candidates.length, value: null, isReportTotal: false };
+    return aggregateCompatibleMetrics(candidates, false)
+      || { items: candidates, multipleCount: candidates.length, value: null, isReportTotal: false };
   }
   const reportItems = items.filter((item) => item.fact_level === "report");
   if (reportItems.length === 1) return { ...reportItems[0], isReportTotal: true };
   if (reportItems.length > 1) {
-    return { items: reportItems, multipleCount: reportItems.length, value: null, isReportTotal: true };
+    return aggregateCompatibleMetrics(reportItems, true)
+      || { items: reportItems, multipleCount: reportItems.length, value: null, isReportTotal: true };
   }
   return null;
 }
@@ -79,7 +124,7 @@ export function metricFor(row, metricType) {
 
 export function displayMetric(metric) {
   if (!metric) return "未披露";
-  if (metric.multipleCount) return `${metric.multipleCount} 项事实`;
+  if (metric.multipleCount && !metric.isAggregated) return `${metric.multipleCount} 项事实`;
   if (metric.value === null || metric.value === undefined || !Number.isFinite(Number(metric.value))) {
     return "未披露";
   }
@@ -190,6 +235,79 @@ export function detailMetricsFor(row) {
   ));
 }
 
+function csvCell(value) {
+  let text = value === null || value === undefined ? "" : String(value);
+  if (typeof value === "string" && /^\s*[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function metricExportParts(row, metricType) {
+  const metric = metricFor(row, metricType);
+  const hasValue = metric && hasFiniteMetricValue(metric.value);
+  return [
+    hasValue ? Number(metric.value) : "",
+    hasValue ? metric.currency || "" : "",
+    hasValue ? metric.unit || "" : "",
+    metric?.multipleCount || (metric ? 1 : 0)
+  ];
+}
+
+function planExportText(row) {
+  return row.planEvents.flatMap((event) => asArray(event.quota)).map((item) => [
+    item.scope || "综合",
+    item.basis || "口径未披露",
+    item.currency || "CNY",
+    item.amount ?? "未披露"
+  ].join(" / ")).join("；");
+}
+
+export function periodicRowsToCsv(rows) {
+  const headers = [
+    "报告期", "报告类型", "年度", "公司代码", "公司名称", "省份", "一级行业", "企业性质",
+    "类别", "品种", "工具", "公告计划候选",
+    "报告期购入", "购入币种", "购入单位", "购入事实数",
+    "报告期售出", "售出币种", "售出单位", "售出事实数",
+    "期末保证金", "保证金币种", "保证金单位", "保证金事实数",
+    "衍生金融资产", "资产币种", "资产单位", "资产事实数",
+    "衍生金融负债", "负债币种", "负债单位", "负债事实数",
+    "公允价值净额", "净额币种", "净额单位", "净额事实数",
+    "衍生品综合损益", "综合损益币种", "综合损益单位", "综合损益事实数",
+    "处置投资收益", "投资收益币种", "投资收益单位", "投资收益事实数",
+    "公允价值变动损益", "公允价值变动币种", "公允价值变动单位", "公允价值变动事实数",
+    "套期会计状态", "套期会计方法", "未应用原因", "匹配状态", "证据状态", "年报原文"
+  ];
+  const body = asArray(rows).map((row) => [
+    row.report.report_period || "",
+    reportTypeLabel(row.report.report_type),
+    row.report.fiscal_year ?? "",
+    row.report.code || "",
+    row.report.name || "",
+    row.companyMeta.province || "",
+    row.companyMeta.industry || "",
+    row.companyMeta.entType || "",
+    row.scope || "",
+    unique(asArray(row.profile.underlyings)).join("、"),
+    unique(asArray(row.profile.instruments)).join("、"),
+    planExportText(row),
+    ...metricExportParts(row, "period_purchase_amount"),
+    ...metricExportParts(row, "period_sale_amount"),
+    ...metricExportParts(row, "margin_end_cash"),
+    ...metricExportParts(row, "derivative_asset_fv"),
+    ...metricExportParts(row, "derivative_liability_fv"),
+    ...metricExportParts(row, "derivative_net_fv"),
+    ...metricExportParts(row, "reported_derivative_comprehensive_pnl"),
+    ...metricExportParts(row, "derivative_disposal_investment_income"),
+    ...metricExportParts(row, "derivative_fv_change_pnl"),
+    row.hedgeAccountingStatus || "",
+    row.hedgeAccountingTypes.join("、"),
+    row.nonApplicationReason || "",
+    row.matchStatus || "",
+    row.evidenceState || "",
+    row.report.pdf_url || ""
+  ]);
+  return `\uFEFF${[headers, ...body].map((line) => line.map(csvCell).join(",")).join("\r\n")}`;
+}
+
 function detailAccountingItemsFor(row) {
   return row.accountingItems.filter((item) => !item.scope || item.scope === row.scope);
 }
@@ -200,6 +318,11 @@ function reportTypeLabel(value) {
     semiannual: "半年度报告",
     quarterly: "季度报告"
   }[value] || value || "定期报告";
+}
+
+export function resolveYearFilter(years, currentValue) {
+  const current = String(currentValue || "all");
+  return current === "all" || years.map(String).includes(current) ? current : "all";
 }
 
 const browserState = {
@@ -228,14 +351,24 @@ function planLabel(row) {
 function metricCell(row, type) {
   const metric = metricFor(row, type);
   const negative = metric && Number(metric.value) < 0 ? " is-negative" : "";
-  const note = metric?.isComputed ? "勾稽计算" : metric?.isReportTotal ? "报告级合计" : metric?.page ? `第 ${metric.page} 页` : "";
+  const note = metric?.isAggregated
+    ? `合计 · ${metric.multipleCount} 项`
+    : metric?.isComputed
+      ? "勾稽计算"
+      : metric?.isReportTotal
+        ? "报告级合计"
+        : metric?.page
+          ? `第 ${metric.page} 页`
+          : "";
   return `<span class="metric-value${negative}">${escape(displayMetric(metric))}</span>${note ? `<span class="metric-note">${escape(note)}</span>` : ""}`;
 }
 
 function flowCell(row) {
   const purchase = metricFor(row, "period_purchase_amount");
   const sale = metricFor(row, "period_sale_amount");
-  return `<span class="metric-value">购 ${escape(displayMetric(purchase))}</span><span class="metric-note">售 ${escape(displayMetric(sale))}</span>`;
+  const purchaseNote = purchase?.isAggregated ? ` · 合计 ${purchase.multipleCount} 项` : "";
+  const saleNote = sale?.isAggregated ? ` · 合计 ${sale.multipleCount} 项` : "";
+  return `<span class="metric-value">购 ${escape(displayMetric(purchase))}${escape(purchaseNote)}</span><span class="metric-note">售 ${escape(displayMetric(sale))}${escape(saleNote)}</span>`;
 }
 
 function accountingBadge(row) {
@@ -284,7 +417,10 @@ function renderSummary() {
   document.querySelector("#periodic-accounting-count").textContent = profiles.filter((row) => row.hedge_accounting_status === "已应用").length.toLocaleString("zh-CN");
   document.querySelector("#nav-periodic-count").textContent = reports.length.toLocaleString("zh-CN");
   const years = unique(reports.map((row) => row.fiscal_year)).sort((a, b) => b - a);
-  document.querySelector("#periodic-year-filter").innerHTML = '<option value="all">全部</option>' + years.map((year) => `<option value="${escape(year)}">${escape(year)}</option>`).join("");
+  const yearFilter = document.querySelector("#periodic-year-filter");
+  yearFilter.innerHTML = '<option value="all">全部</option>' + years.map((year) => `<option value="${escape(year)}">${escape(year)}</option>`).join("");
+  browserState.filters.year = resolveYearFilter(years, browserState.filters.year);
+  yearFilter.value = browserState.filters.year;
 }
 
 function renderDetail(row) {
@@ -413,6 +549,25 @@ function bindBrowserEvents() {
     if (!button) return;
     const row = browserState.rows.find((candidate) => candidate.rowId === button.dataset.periodicRow);
     if (row) renderDetail(row);
+  });
+  document.querySelector("#periodic-export-button")?.addEventListener("click", () => {
+    const rows = filterPeriodicRows(browserState.rows, browserState.filters);
+    const shell = window.HedgeShell;
+    if (!rows.length) {
+      shell?.showToast("当前筛选没有可导出的定期报告数据");
+      return;
+    }
+    const blob = new Blob([periodicRowsToCsv(rows)], { type: "text/csv;charset=utf-8" });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    link.href = href;
+    link.download = `hedge-periodic-actuals-${date}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(href);
+    shell?.showToast(`已导出 ${rows.length.toLocaleString("zh-CN")} 条定期报告结果`);
   });
 }
 
