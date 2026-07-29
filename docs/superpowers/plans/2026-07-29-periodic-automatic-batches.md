@@ -129,12 +129,12 @@ Expected: zero failures, `yaml ok`, and exit code 0.
 Confirm only workflow, two scripts, tests, project documentation, spec, plan and worklog are
 included; verify `.env` is absent.
 
-- [ ] **Step 4: Publish through GitHub connector**
+- [x] **Step 4: Publish through GitHub connector**
 
 Read remote `main`, stop if its baseline changed unexpectedly, create an atomic commit with
 message `Automate periodic report batches`, and update `main` without force.
 
-- [ ] **Step 5: Verify remote workflow**
+- [x] **Step 5: Verify remote workflow**
 
 Read the committed workflow and confirm the cron, limits, pause guard and failure-retry
 semantics match the tested local files.
