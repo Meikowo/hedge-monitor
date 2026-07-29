@@ -420,4 +420,3 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   window.HedgePeriodic = Object.freeze({ activate, refresh });
   bindBrowserEvents();
 }
-

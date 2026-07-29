@@ -129,4 +129,3 @@ assert.equal(filterPeriodicRows(rows, {
 }).length, 0);
 
 console.log("periodic production logic ok");
-

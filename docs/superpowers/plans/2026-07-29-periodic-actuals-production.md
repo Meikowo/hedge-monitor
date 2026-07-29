@@ -88,4 +88,3 @@
 - [ ] Use the public API to confirm 40 profiles and at least 265 verified metric facts load without startup regression.
 - [ ] Record the extraction fixes, 40-report checkpoint, production frontend scope, remaining M5 boundary, and rollback commit in project documents.
 - [ ] Commit only intended files, push `main` through the GitHub connector, wait for Pages, and verify the production asset version and “计划与实际” view.
-

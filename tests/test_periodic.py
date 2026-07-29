@@ -484,7 +484,735 @@ class PeriodicNormalizationTest(unittest.TestCase):
 报告期实
 际损益情
 况的说明
-报告期内，衍生品投资业务实…8016 tokens truncated…== group for row in priority_rows)
+报告期内，衍生品投资业务实际产生损益-204.14 万元。
+套期保值效果的说明
+"""
+        metrics = extract_explicit_pnl_metrics(body)
+
+        self.assertEqual([
+            (item["fact_level"], item["scope"], item["value"], item["unit"])
+            for item in metrics
+        ], [
+            ("report", None, -204.14, "万元"),
+        ])
+
+    def test_unverified_model_scaled_value_is_not_persisted(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "reported_derivative_comprehensive_pnl",
+                "fact_level": "scope",
+                "scope": "商品",
+                "value": 194957400,
+                "currency": "CNY",
+                "unit": "万元",
+                "time_basis": "period",
+                "raw": "期货套保合约报告期内实际损益为19,495.74万元",
+                "page": 35,
+            }],
+        }, "【P35】期货套保合约报告期内实际损益为19,495.74万元")
+
+        self.assertEqual(metrics, [])
+
+    def test_explicit_no_derivative_business_is_mention_without_value(self):
+        top, metrics = normalize({
+            "disclosure_status": "未提及",
+            "summary": "公司报告期不存在衍生品投资。",
+            "metrics": [],
+        }, "【P32】公司报告期不存在衍生品投资。")
+
+        self.assertEqual(metrics, [])
+        self.assertEqual(top["disclosure_status"], "提及无数值")
+
+    def test_accounting_policy_is_not_evidence_of_actual_application(self):
+        messages = build_profile_messages(
+            "2025年年度报告",
+            "格力电器",
+            "000651",
+            "2025FY",
+            "【P125】本公司的套期包括公允价值套期、现金流量套期以及境外经营净投资套期。",
+        )
+        prompt = "\n".join(message["content"] for message in messages)
+
+        self.assertIn("会计政策", prompt)
+        self.assertIn("不能证明报告期实际应用", prompt)
+
+    def test_group_policy_wording_is_not_actual_application(self):
+        top, _ = normalize({
+            "disclosure_status": "有数值",
+            "hedge_accounting_status": "已应用",
+            "hedge_accounting_types": ["现金流量套期"],
+            "hedge_accounting_evidence": {
+                "page": 185,
+                "quote": "本集团的套期主要包括现金流量套期。",
+            },
+        }, "【P185】本集团的套期主要包括现金流量套期。")
+
+        self.assertEqual(top["hedge_accounting_status"], "未明确披露")
+        self.assertEqual(top["hedge_accounting_types"], [])
+        self.assertIsNone(top["hedge_accounting_page"])
+
+    def test_unclear_accounting_status_cannot_keep_applied_types(self):
+        top, _ = normalize({
+            "disclosure_status": "有数值",
+            "hedge_accounting_status": "未明确披露",
+            "hedge_accounting_types": ["公允价值套期"],
+            "hedge_accounting_evidence": {
+                "page": 103,
+                "quote": "公允价值套期是指对已确认资产或负债公允价值变动风险敞口进行的套期。",
+            },
+        }, "【P103】公允价值套期是指对已确认资产或负债公允价值变动风险敞口进行的套期。")
+
+        self.assertEqual(top["hedge_accounting_status"], "未明确披露")
+        self.assertEqual(top["hedge_accounting_types"], [])
+        self.assertEqual(top["hedge_accounting"], [])
+
+    def test_summary_cannot_claim_accounting_application_when_status_is_not_applied(self):
+        top, _ = normalize({
+            "disclosure_status": "有数值",
+            "scopes": ["商品", "外汇"],
+            "hedge_accounting_status": "未应用",
+            "summary": "公司开展商品和外汇业务，两类均明确采用套期会计核算。",
+        }, "")
+
+        self.assertEqual(
+            top["summary"],
+            "报告期披露商品、外汇衍生品业务；未应用套期会计。",
+        )
+
+    def test_summary_does_not_claim_business_disclosure_when_status_is_not_mentioned(self):
+        top, _ = normalize({
+            "disclosure_status": "未提及",
+            "hedge_accounting_status": "未应用",
+            "summary": "公司开展衍生品业务并采用套期会计。",
+        }, "")
+
+        self.assertEqual(
+            top["summary"],
+            "报告期未发现衍生品业务披露；未应用套期会计。",
+        )
+
+    def test_policy_only_types_are_replaced_by_actual_cash_flow_hedge_evidence(self):
+        top, _ = normalize({
+            "disclosure_status": "有数值",
+            "hedge_accounting": ["公允价值套期", "现金流量套期", "境外经营净投资套期"],
+            "hedge_accounting_status": "混合应用",
+            "hedge_accounting_types": ["公允价值套期", "现金流量套期", "境外经营净投资套期"],
+            "hedge_accounting_evidence": {
+                "page": 125,
+                "quote": "本公司的套期包括公允价值套期、现金流量套期以及对境外经营净投资的套期。",
+            },
+        }, (
+            "【P125】本公司的套期包括公允价值套期、现金流量套期以及对境外经营净投资的套期。\n"
+            "【P171】现金流量套期储备 291,500.00"
+        ))
+
+        self.assertEqual(top["hedge_accounting_status"], "已应用")
+        self.assertEqual(top["hedge_accounting_types"], ["现金流量套期"])
+        self.assertEqual(top["hedge_accounting"], ["现金流量套期"])
+        self.assertEqual(top["hedge_accounting_page"], 171)
+        self.assertTrue(top["hedge_accounting_quote_verified"])
+
+    def test_cash_flow_policy_quote_is_replaced_by_actual_reserve_evidence(self):
+        top, _ = normalize({
+            "disclosure_status": "有数值",
+            "hedge_accounting_status": "已应用",
+            "hedge_accounting_types": ["现金流量套期"],
+            "hedge_accounting_evidence": {
+                "page": 126,
+                "quote": "预期现金流量影响损益的相同期间，将现金流量套期储备转出。",
+            },
+        }, (
+            "【P126】预期现金流量影响损益的相同期间，将现金流量套期储备转出。\n"
+            "【P171】现金流量套期储备 -2,219,839.96 291,500.00"
+        ))
+
+        self.assertEqual(top["hedge_accounting_page"], 171)
+        self.assertIn("291,500.00", top["hedge_accounting_quote"])
+
+    def test_no_derivative_business_supplies_verified_non_application_evidence(self):
+        top, _ = normalize({
+            "disclosure_status": "未提及",
+            "hedge_accounting_status": "未应用",
+            "hedge_accounting_evidence": {
+                "page": 132,
+                "quote": "套期会计政策包括现金流量套期。",
+            },
+        }, "【P32】公司报告期不存在衍生品投资。")
+
+        self.assertEqual(top["disclosure_status"], "提及无数值")
+        self.assertEqual(top["hedge_accounting_status"], "未应用")
+        self.assertEqual(top["non_application_reason"], "报告期不存在衍生品投资")
+        self.assertEqual(top["hedge_accounting_page"], 32)
+        self.assertTrue(top["hedge_accounting_quote_verified"])
+
+    def test_explicit_not_applicable_hedge_accounting_checkbox_means_not_applied(self):
+        top, _ = normalize({
+            "disclosure_status": "有数值",
+            "hedge_accounting_status": "未明确披露",
+        }, (
+            "【P259】(2). 公司开展符合条件套期业务并应用套期会计\n"
+            "□适用 √不适用"
+        ))
+
+        self.assertEqual(top["hedge_accounting_status"], "未应用")
+        self.assertEqual(top["hedge_accounting_types"], [])
+        self.assertIsNone(top["non_application_reason"])
+        self.assertEqual(top["hedge_accounting_page"], 259)
+        self.assertTrue(top["hedge_accounting_quote_verified"])
+
+    def test_checked_applicable_checkbox_is_not_reversed_by_unchecked_not_applicable(self):
+        top, _ = normalize({
+            "disclosure_status": "有数值",
+            "scopes": ["商品", "外汇"],
+            "hedge_accounting_status": "已应用",
+            "hedge_accounting_types": ["公允价值套期", "现金流量套期"],
+            "summary": "公司对汇率风险采用公允价值套期，对商品价格风险采用现金流量套期。",
+        }, (
+            "【P214】(2). 公司开展符合条件套期业务并应用套期会计\n"
+            "√适用 □不适用\n"
+            "套期类别 公允价值套期 60,685,782.40\n"
+            "【P215】现金流量套期 193,048,173.52"
+        ))
+
+        self.assertEqual(top["hedge_accounting_status"], "已应用")
+        self.assertEqual(
+            top["hedge_accounting_types"],
+            ["公允价值套期", "现金流量套期"],
+        )
+
+    def test_verified_table_cells_replace_llm_column_guesses(self):
+        result = {
+            "metrics": [{
+                "metric_type": "period_purchase_amount",
+                "value": 3544.49,
+                "page": 35,
+            }]
+        }
+        table_metrics = [{
+            "metric_type": "derivative_fv_change_pnl",
+            "value": 3544.49,
+            "page": 35,
+            "table_cell_verified": True,
+        }]
+
+        merged = merge_table_metrics(
+            result,
+            table_metrics,
+            table_pages={35},
+            selected_passes=["operations", "pnl"],
+        )
+
+        self.assertEqual(merged["metrics"], table_metrics)
+
+    def test_verified_note_cells_replace_same_page_llm_guess(self):
+        result = {"metrics": [{
+            "metric_type": "margin_end_cash",
+            "value": 32_918_039.90,
+            "page": 312,
+        }]}
+        note_metrics = [{
+            "metric_type": "margin_end_cash",
+            "value": 116_653_692.30,
+            "page": 312,
+            "table_cell_verified": True,
+        }]
+
+        merged = merge_verified_note_metrics(
+            result,
+            note_metrics,
+            selected_passes=["position"],
+        )
+
+        self.assertEqual(merged["metrics"], note_metrics)
+
+    def test_nullish_underlying_is_removed(self):
+        top, _ = normalize({"disclosure_status": "未提及", "underlyings": ["None", None, "null"]}, "")
+        self.assertEqual(top["underlyings"], [])
+
+    def test_verification_levels_keep_period_end_distinct_from_peak(self):
+        self.assertEqual(classify("保证金占用", {"margin_peak_reported"}).level, "A")
+        self.assertEqual(classify("保证金占用", {"margin_end_cash"}).level, "B")
+        self.assertEqual(classify("保证金占用", {"period_pnl"}).level, "C")
+        self.assertEqual(classify("保证金占用", set()).level, "D")
+
+    def test_v15_keeps_pnl_components_as_separate_report_facts(self):
+        top, metrics = normalize({
+            "disclosure_status": "有数值",
+            "scopes": ["商品", "外汇"],
+            "hedge_accounting_status": "未应用",
+            "hedge_accounting_types": [],
+            "non_application_reason": None,
+            "hedge_accounting_evidence": {
+                "page": 259,
+                "quote": "公司开展符合条件套期业务并应用套期会计：不适用。",
+            },
+            "metrics": [
+                {
+                    "metric_type": "reported_derivative_comprehensive_pnl",
+                    "fact_level": "report",
+                    "scope": "外汇",
+                    "value": -3474.88,
+                    "currency": "CNY",
+                    "unit": "万元",
+                    "time_basis": "period",
+                    "raw": "投资收益与公允价值变动损益及浮动损益合计为-3,474.88万元",
+                    "page": 44,
+                },
+                {
+                    "metric_type": "derivative_disposal_investment_income",
+                    "fact_level": "report",
+                    "value": 23929647.46,
+                    "currency": "CNY",
+                    "unit": "元",
+                    "time_basis": "period",
+                    "raw": "处置衍生金融工具取得的投资收益23,929,647.46",
+                    "page": 235,
+                },
+                {
+                    "metric_type": "derivative_fv_change_pnl",
+                    "fact_level": "report",
+                    "value": -58678398.34,
+                    "currency": "CNY",
+                    "unit": "元",
+                    "time_basis": "period",
+                    "raw": "衍生金融工具产生的公允价值变动损益-58,678,398.34",
+                    "page": 236,
+                },
+            ],
+        }, (
+            "【P44】投资收益与公允价值变动损益及浮动损益合计为-3,474.88万元\n"
+            "【P235】处置衍生金融工具取得的投资收益23,929,647.46\n"
+            "【P236】衍生金融工具产生的公允价值变动损益-58,678,398.34\n"
+            "【P259】公司开展符合条件套期业务并应用套期会计：不适用。"
+        ))
+
+        self.assertEqual(top["hedge_accounting_status"], "未应用")
+        self.assertEqual(top["hedge_accounting_types"], [])
+        self.assertIsNone(top["non_application_reason"])
+        self.assertEqual(top["hedge_accounting_page"], 259)
+        self.assertTrue(top["hedge_accounting_quote_verified"])
+        self.assertEqual([item["metric_type"] for item in metrics], [
+            "reported_derivative_comprehensive_pnl",
+            "derivative_disposal_investment_income",
+            "derivative_fv_change_pnl",
+        ])
+        self.assertTrue(all(item["fact_level"] == "report" for item in metrics))
+        self.assertTrue(all(item["scope"] is None for item in metrics))
+        self.assertTrue(all(item["underlying"] is None for item in metrics))
+
+    def test_generic_trading_asset_disposal_is_not_derivative_income(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "derivative_disposal_investment_income",
+                "fact_level": "report",
+                "value": -102120.75,
+                "unit": "元",
+                "time_basis": "period",
+                "raw": "处置交易性金融资产取得的投资收益 -102,120.75",
+                "page": 225,
+            }],
+        }, "【P225】处置交易性金融资产取得的投资收益 -102,120.75")
+
+        self.assertEqual(metrics, [])
+
+    def test_hedge_business_disposal_loss_is_kept_as_realized_derivative_pnl(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "scopes": ["商品"],
+            "metrics": [{
+                "metric_type": "reported_derivative_comprehensive_pnl",
+                "fact_level": "scope",
+                "scope": "商品",
+                "value": -9950713.48,
+                "unit": "元",
+                "time_basis": "period",
+                "source_section": "衍生品投资情况-报告期实际损益情况的说明",
+                "account_name": "处置损益",
+                "raw": "处置损益-9,950,713.48元",
+                "page": 29,
+            }],
+        }, "【P29】本期公允价值变动损益-7,676,900.00元，处置损益-9,950,713.48元")
+
+        self.assertEqual(len(metrics), 1)
+        self.assertEqual(
+            metrics[0]["metric_type"],
+            "derivative_disposal_investment_income",
+        )
+        self.assertEqual(metrics[0]["scope"], "商品")
+
+    def test_gold_lease_deposit_is_not_derivative_margin(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "margin_end_cash",
+                "fact_level": "report",
+                "value": 342340000,
+                "unit": "元",
+                "time_basis": "period_end",
+                "source_section": "货币资金",
+                "account_name": "黄金租赁保证金（其他货币资金）",
+                "raw": "期末其他货币资金包括黄金租赁保证金342,340,000.00元",
+                "page": 106,
+            }],
+        }, "【P106】期末其他货币资金包括黄金租赁保证金342,340,000.00元")
+
+        self.assertEqual(metrics, [])
+
+    def test_gold_td_investment_income_is_kept_with_commodity_scope(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "scopes": ["商品"],
+            "metrics": [{
+                "metric_type": "derivative_disposal_investment_income",
+                "fact_level": "report",
+                "value": -124564900.58,
+                "unit": "元",
+                "time_basis": "period",
+                "source_section": "投资收益",
+                "account_name": "黄金T+D、白银T+D交易投资收益",
+                "raw": "黄金T+D、白银T+D交易投资收益 -124,564,900.58",
+                "page": 143,
+                "table_cell_verified": True,
+            }],
+        }, "【P143】黄金T+D、白银T+D交易投资收益 -124,564,900.58")
+
+        self.assertEqual(len(metrics), 1)
+        self.assertEqual(metrics[0]["scope"], "商品")
+        self.assertEqual(metrics[0]["fact_level"], "scope")
+
+    def test_accepted_periodic_review_is_protected_by_default(self):
+        self.assertTrue(hasattr(periodic_extract, "should_skip_reviewed"))
+        self.assertTrue(periodic_extract.should_skip_reviewed("accepted", False))
+        self.assertFalse(periodic_extract.should_skip_reviewed("accepted", True))
+        self.assertFalse(periodic_extract.should_skip_reviewed("pending", False))
+
+    def test_v15_margin_fact_keeps_account_context(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "margin_end_cash",
+                "fact_level": "scope",
+                "scope": "商品",
+                "value": 65000,
+                "currency": "CNY",
+                "unit": "万元",
+                "time_basis": "period_end",
+                "account_name": "其他货币资金",
+                "is_restricted": True,
+                "counterparty": "某期货公司",
+                "raw": "期末期货保证金65,000万元，列入其他货币资金",
+                "page": 188,
+            }],
+        }, "【P188】期末期货保证金65,000万元，列入其他货币资金")
+
+        self.assertEqual(metrics[0]["fact_level"], "scope")
+        self.assertEqual(metrics[0]["scope"], "商品")
+        self.assertEqual(metrics[0]["account_name"], "其他货币资金")
+        self.assertIs(metrics[0]["is_restricted"], True)
+        self.assertEqual(metrics[0]["counterparty"], "某期货公司")
+
+    def test_v15_underlying_fact_requires_an_underlying(self):
+        _, metrics = normalize({
+            "disclosure_status": "有数值",
+            "metrics": [{
+                "metric_type": "derivative_asset_fv",
+                "fact_level": "underlying",
+                "scope": "商品",
+                "underlying": None,
+                "value": 100,
+                "unit": "万元",
+                "time_basis": "period_end",
+                "raw": "衍生金融资产100万元",
+                "page": 20,
+            }],
+        }, "【P20】衍生金融资产100万元")
+
+        self.assertEqual(metrics[0]["fact_level"], "scope")
+        self.assertEqual(metrics[0]["scope"], "商品")
+
+    def test_v15_mixed_accounting_items_keep_business_level_evidence(self):
+        body = (
+            "【P88】外汇远期采用现金流量套期。\n"
+            "【P89】商品期货未应用套期会计，因不符合套期会计指定条件。"
+        )
+        items = normalize_accounting_items({
+            "hedge_accounting_items": [
+                {
+                    "scope": "外汇",
+                    "instrument": "外汇远期",
+                    "underlying_asset": "美元",
+                    "application_status": "已应用",
+                    "accounting_type": "现金流量套期",
+                    "non_application_reason": None,
+                    "source_section": "套期会计",
+                    "page": 88,
+                    "quote": "外汇远期采用现金流量套期。",
+                    "confidence": 0.98,
+                },
+                {
+                    "scope": "商品",
+                    "instrument": "期货",
+                    "underlying_asset": "铜",
+                    "application_status": "未应用",
+                    "accounting_type": None,
+                    "non_application_reason": "不符合套期会计指定条件",
+                    "source_section": "衍生品投资情况",
+                    "page": 89,
+                    "quote": "商品期货未应用套期会计，因不符合套期会计指定条件。",
+                    "confidence": 0.95,
+                },
+            ],
+        }, body)
+
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["accounting_type"], "现金流量套期")
+        self.assertTrue(items[0]["quote_verified"])
+        self.assertEqual(items[1]["non_application_reason"], "不符合套期会计指定条件")
+        self.assertFalse(items[1]["need_review"])
+
+    def test_uncertain_accounting_item_does_not_keep_a_policy_method(self):
+        items = normalize_accounting_items({
+            "hedge_accounting_items": [{
+                "scope": "外汇",
+                "instrument": "外汇远期",
+                "application_status": "未明确披露",
+                "accounting_type": "现金流量套期",
+                "page": 48,
+                "quote": "外汇远期合约期末金额516,807千元。",
+            }],
+        }, "【P48】外汇远期合约期末金额516,807千元。")
+
+        self.assertEqual(items[0]["application_status"], "未明确披露")
+        self.assertIsNone(items[0]["accounting_type"])
+
+    def test_policy_only_quote_is_not_duplicated_into_business_items(self):
+        items = normalize_accounting_items({
+            "hedge_accounting_items": [{
+                "scope": "外汇",
+                "instrument": "外汇远期",
+                "application_status": "未明确披露",
+                "accounting_type": "现金流量套期",
+                "page": 185,
+                "quote": "本集团的套期主要包括现金流量套期。",
+            }],
+        }, "【P185】本集团的套期主要包括现金流量套期。")
+
+        self.assertEqual(items, [])
+
+    def test_generic_cash_flow_hedge_policy_is_not_a_business_item(self):
+        quote = (
+            "除现金流量套期中属于套期有效的部分计入其他综合收益并于被套期项目"
+            "影响损益时转出计入当期损益之外，衍生工具公允价值变动而产生的利得"
+            "或损失，直接计入当期损益"
+        )
+        items = normalize_accounting_items({
+            "hedge_accounting_items": [{
+                "scope": "外汇",
+                "instrument": "未具体披露",
+                "application_status": "需复核",
+                "page": 141,
+                "quote": quote,
+            }],
+        }, f"【P141】{quote}")
+
+        self.assertEqual(items, [])
+
+    def test_decisive_accounting_item_removes_same_scope_uncertain_duplicate(self):
+        body = (
+            "【P35】商品期货是否应用套期会计未明确披露。\n"
+            "【P171】现金流量套期储备 291,500.00"
+        )
+        items = normalize_accounting_items({
+            "hedge_accounting_items": [
+                {
+                    "scope": "商品",
+                    "application_status": "未明确披露",
+                    "page": 35,
+                    "quote": "商品期货是否应用套期会计未明确披露。",
+                },
+                {
+                    "scope": "商品",
+                    "application_status": "已应用",
+                    "accounting_type": "现金流量套期",
+                    "page": 171,
+                    "quote": "现金流量套期储备 291,500.00",
+                },
+            ],
+        }, body)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["application_status"], "已应用")
+
+    def test_unverified_decisive_accounting_claim_is_dropped(self):
+        items = normalize_accounting_items({
+            "hedge_accounting_items": [{
+                "scope": "外汇",
+                "application_status": "已应用",
+                "accounting_type": "公允价值套期",
+                "page": 35,
+                "quote": "远期金融合约采用公允价值套期。",
+            }],
+        }, "【P35】远期金融合约 -17,074.07 -6,509.50")
+
+        self.assertEqual(items, [])
+
+    def test_verified_business_table_row_does_not_prove_accounting_application(self):
+        items = normalize_accounting_items({
+            "hedge_accounting_items": [{
+                "scope": "利率",
+                "instrument": "利率掉期合约",
+                "application_status": "已应用",
+                "accounting_type": "现金流量套期",
+                "page": 48,
+                "quote": "利率掉期合约 - 1,823,850 458 - - - 1,747,850 3.47%",
+            }],
+        }, "【P48】利率掉期合约 - 1,823,850 458 - - - 1,747,850 3.47%")
+
+        self.assertEqual(items, [])
+
+    def test_cash_flow_reserve_creates_verified_actual_accounting_item(self):
+        items = normalize_accounting_items(
+            {"hedge_accounting_items": []},
+            "【P171】现金流量套期储备 -2,219,839.96 291,500.00",
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["application_status"], "已应用")
+        self.assertEqual(items[0]["accounting_type"], "现金流量套期")
+        self.assertTrue(items[0]["quote_verified"])
+
+    def test_blank_cash_flow_reserve_row_is_not_actual_application(self):
+        items = normalize_accounting_items(
+            {"hedge_accounting_items": []},
+            "【P267】5.现金流量套期储备\n"
+            "6.外币财务报表折算差额\n"
+            "-42,536.92\n-1,055,622.64",
+        )
+
+        self.assertEqual(items, [])
+
+    def test_no_derivative_business_creates_non_application_item(self):
+        items = normalize_accounting_items(
+            {"hedge_accounting_items": [{
+                "application_status": "未明确披露",
+                "page": 132,
+                "quote": "会计政策包括现金流量套期。",
+            }]},
+            "【P32】公司报告期不存在衍生品投资。\n"
+            "【P132】会计政策包括现金流量套期。",
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["application_status"], "未应用")
+        self.assertEqual(items[0]["page"], 32)
+        self.assertTrue(items[0]["quote_verified"])
+
+    def test_checkbox_keeps_a_verified_specific_non_application_reason(self):
+        body = (
+            "【P233】公司开展符合条件套期业务并应用套期会计 □适用 √不适用。\n"
+            "衍生工具未被指定为套期工具或不符合套期会计准则的要求，未应用套期会计。"
+        )
+        items = normalize_accounting_items({
+            "hedge_accounting_items": [{
+                "scope": "商品",
+                "instrument": "期货",
+                "application_status": "未应用",
+                "non_application_reason": "衍生工具未被指定为套期工具或不符合套期会计准则的要求",
+                "page": 233,
+                "quote": "衍生工具未被指定为套期工具或不符合套期会计准则的要求，未应用套期会计。",
+            }],
+        }, body)
+
+        self.assertEqual(len(items), 1)
+        self.assertIn("未被指定", items[0]["non_application_reason"])
+
+    def test_verified_accounting_item_promotes_top_level_evidence(self):
+        top = {
+            "hedge_accounting_status": "未应用",
+            "hedge_accounting_page": 375,
+            "hedge_accounting_quote": "包含省略号……",
+            "hedge_accounting_quote_verified": False,
+            "non_application_reason": "原文明示原因",
+        }
+        items = [{
+            "application_status": "未应用",
+            "page": 375,
+            "quote": "考虑交易期限短及处理成本效益，未应用套期会计。",
+            "quote_verified": True,
+            "non_application_reason": "交易期限短及处理成本效益",
+        }]
+
+        promote_verified_accounting_evidence(top, items)
+
+        self.assertTrue(top["hedge_accounting_quote_verified"])
+        self.assertNotIn("省略号", top["hedge_accounting_quote"])
+        self.assertEqual(top["non_application_reason"], "交易期限短及处理成本效益")
+
+    def test_multipass_metric_families_are_disjoint_and_complete(self):
+        members = [metric for family in METRIC_FAMILIES.values() for metric in family]
+
+        self.assertEqual(len(members), len(set(members)))
+        self.assertEqual(set(members), {
+            "period_purchase_amount", "period_sale_amount", "ending_balance",
+            "net_asset_ratio", "notional_end_reported", "notional_peak_reported",
+            "contract_quantity_end", "reported_derivative_comprehensive_pnl",
+            "derivative_disposal_investment_income", "derivative_fv_change_pnl",
+            "oci_amount", "reclassification_amount", "derivative_asset_fv",
+            "derivative_liability_fv", "derivative_net_fv", "margin_end_cash",
+            "margin_peak_reported", "collateral_end_fair_value",
+            "credit_facility_used_end", "option_premium_usage_peak",
+        })
+
+    def test_merge_pass_results_rejects_metrics_from_the_wrong_family(self):
+        merged = merge_pass_results(
+            {"disclosure_status": "有数值", "metrics": [{"metric_type": "period_pnl"}]},
+            {
+                "operations": {"metrics": [
+                    {"metric_type": "period_purchase_amount", "value": 1},
+                    {"metric_type": "derivative_asset_fv", "value": 2},
+                ]},
+                "position": {"metrics": [
+                    {"metric_type": "derivative_asset_fv", "value": 3},
+                ]},
+            },
+        )
+
+        self.assertEqual([row["value"] for row in merged["metrics"]], [1, 3])
+
+
+class PeriodicValidationBatchTest(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_validation_batch_has_six_unique_cross_scope_companies(self):
+        path = self.ROOT / "config" / "annual_validation_2025.csv"
+        with path.open(newline="", encoding="utf-8-sig") as f:
+            rows = list(csv.DictReader(f))
+
+        self.assertEqual(len(rows), 6)
+        self.assertEqual({row["code"] for row in rows}, {
+            "000039", "000651", "002385", "002649", "600961", "688223",
+        })
+        self.assertEqual({row["scope_group"] for row in rows}, {
+            "商品", "外汇", "商品+外汇",
+        })
+        self.assertTrue(all(row["locator_terms"] for row in rows))
+
+    def test_priority_pool_has_120_balanced_companies_and_contains_poc30(self):
+        priority_path = self.ROOT / "config" / "annual_priority_2025.csv"
+        self.assertTrue(priority_path.exists())
+        with priority_path.open(newline="", encoding="utf-8-sig") as f:
+            priority_rows = list(csv.DictReader(f))
+        with (self.ROOT / "config" / "annual_poc_2025.csv").open(
+            newline="",
+            encoding="utf-8-sig",
+        ) as f:
+            poc_rows = list(csv.DictReader(f))
+
+        self.assertEqual(len(priority_rows), 120)
+        self.assertEqual(
+            {group: sum(row["scope_group"] == group for row in priority_rows)
              for group in ("商品", "外汇", "商品+外汇")},
             {"商品": 40, "外汇": 40, "商品+外汇": 40},
         )
@@ -945,4 +1673,3 @@ class PeriodicNormalizationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

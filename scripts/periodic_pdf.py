@@ -739,4 +739,3 @@ def locate_pdf(content: bytes, custom_terms: list[str] | None = None) -> Located
         locator_terms=sorted(matched),
         page_scores={p: scores[p] for p in candidate_pages if p in scores},
     )
-

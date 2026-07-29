@@ -528,7 +528,146 @@ def normalize_accounting_items(result: dict, body: str) -> list[dict]:
             if isinstance(confidence, (int, float)) and 0 <= confidence <= 1 else None
         )
         need_review = (
-          …1144 tokens truncated… tail = compact[heading.end():heading.end() + 50]
+            status == "需复核"
+            or (status == "已应用" and accounting_type is None)
+            or quote_verified is False
+        )
+        items.append({
+            "scope": raw_item.get("scope") if raw_item.get("scope") in SCOPES else None,
+            "instrument": raw_item.get("instrument") or None,
+            "underlying_asset": raw_item.get("underlying_asset") or None,
+            "application_status": status,
+            "accounting_type": accounting_type,
+            "non_application_reason": raw_item.get("non_application_reason") or None,
+            "source_section": raw_item.get("source_section") or None,
+            "page": page,
+            "quote": quote,
+            "quote_verified": quote_verified,
+            "confidence": confidence,
+            "need_review": need_review,
+        })
+    items = [
+        item for item in items
+        if item["quote_verified"] is True
+    ]
+    checkbox_page, checkbox_quote = find_non_application_checkbox(body)
+    if checkbox_page:
+        verified_unapplied = [
+            item for item in items
+            if item["application_status"] == "未应用"
+            and item["quote_verified"] is True
+        ]
+        if verified_unapplied:
+            return verified_unapplied
+        return [{
+            "scope": None,
+            "instrument": None,
+            "underlying_asset": None,
+            "application_status": "未应用",
+            "accounting_type": None,
+            "non_application_reason": None,
+            "source_section": "套期",
+            "page": checkbox_page,
+            "quote": checkbox_quote,
+            "quote_verified": True,
+            "confidence": 1.0,
+            "need_review": False,
+        }]
+    cash_flow_page, cash_flow_quote = find_page_evidence(
+        body,
+        "现金流量套期储备",
+        require_numeric=True,
+    )
+    if cash_flow_page and not any(
+        item["application_status"] == "已应用"
+        and item["accounting_type"] == "现金流量套期"
+        for item in items
+    ):
+        items.append({
+            "scope": None,
+            "instrument": None,
+            "underlying_asset": None,
+            "application_status": "已应用",
+            "accounting_type": "现金流量套期",
+            "non_application_reason": None,
+            "source_section": "其他综合收益",
+            "page": cash_flow_page,
+            "quote": cash_flow_quote,
+            "quote_verified": True,
+            "confidence": 1.0,
+            "need_review": False,
+        })
+    decisive_scopes = {
+        item["scope"]
+        for item in items
+        if item["application_status"] in {"已应用", "未应用"}
+    }
+    return [
+        item for item in items
+        if not (
+            item["application_status"] == "未明确披露"
+            and item["scope"] in decisive_scopes
+        )
+    ]
+
+
+def find_page_evidence(
+    body: str,
+    term: str,
+    *,
+    require_numeric: bool = False,
+) -> tuple[int | None, str | None]:
+    for match in re.finditer(
+        r"【P(?P<page>\d+)】(?P<body>.*?)(?=【P\d+】|\Z)",
+        body or "",
+        flags=re.S,
+    ):
+        page_body = match.group("body")
+        if term not in page_body:
+            continue
+        numeric_evidence = None
+        if require_numeric:
+            numeric_evidence = re.search(
+                re.escape(term)
+                + (
+                    r"(?:\s+[-+]?(?:"
+                    r"[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?"
+                    r"|[0-9]+\.[0-9]+)){1,8}"
+                ),
+                page_body,
+            )
+            if not numeric_evidence:
+                continue
+        quote = (
+            re.sub(r"\s+", " ", numeric_evidence.group(0)).strip()
+            if numeric_evidence
+            else next(
+                (
+                    line.strip()
+                    for line in page_body.splitlines()
+                    if term in line and line.strip()
+                ),
+                term,
+            )
+        )
+        return int(match.group("page")), quote[:240]
+    return None, None
+
+
+def find_non_application_checkbox(body: str) -> tuple[int | None, str | None]:
+    for match in re.finditer(
+        r"【P(?P<page>\d+)】(?P<body>.*?)(?=【P\d+】|\Z)",
+        body or "",
+        flags=re.S,
+    ):
+        compact = re.sub(r"\s+", "", match.group("body"))
+        heading = re.search(
+            r"公司开展符合条件套期业务并应用套期会计",
+            compact,
+        )
+        if not heading:
+            continue
+        tail = compact[heading.end():heading.end() + 50]
         checked = re.match(
             r"(?:[□☐]适用[√✓☑■]不适用|"
             r"适用[□☐][√✓☑■]?不适用|"
@@ -1011,4 +1150,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -53,4 +53,3 @@ assert.match(periodic, /window\.HedgePeriodic/);
 assert.match(periodic, /Object\.freeze\(\{ activate, refresh \}\)/);
 
 console.log(`web structure ok: ${new Set(referencedIds).size} referenced ids resolved`);
-
