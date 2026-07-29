@@ -22,29 +22,78 @@ def load_terms(path: str) -> dict[str, list[str]]:
                 for row in csv.DictReader(f)}
 
 
+def build_report_query(
+    terms: dict[str, list[str]],
+    limit: int,
+    report_ids: list[str] | None = None,
+    retry_failed: bool = False,
+    fiscal_year: int = 2025,
+    report_type: str = "annual",
+) -> dict[str, str]:
+    params = {
+        "select": "report_id,code,name,title,pdf_url,status",
+        "order": "publish_date.desc",
+        "limit": str(limit),
+        "fiscal_year": f"eq.{fiscal_year}",
+        "report_type": f"eq.{report_type}",
+    }
+    if report_ids:
+        params["report_id"] = f"in.({','.join(report_ids)})"
+    else:
+        params["status"] = (
+            "in.(discovered,failed)" if retry_failed else "eq.discovered"
+        )
+        params["code"] = f"in.({','.join(terms)})"
+    return params
+
+
+def claim_report(report_id: str, write: bool) -> None:
+    """在下载前持久化领取；runner 强制终止时不会自动重复处理。"""
+    if write:
+        sb_update(
+            "periodic_reports",
+            {"report_id": f"eq.{report_id}"},
+            {
+                "status": "failed",
+                "note": "定位处理中；异常中断时需人工重试",
+            },
+        )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="定期报告候选页定位")
     ap.add_argument("--sample", default=str(ROOT / "config" / "annual_poc_2025.csv"))
     ap.add_argument("--limit", type=int, default=2)
     ap.add_argument("--report-id", action="append")
+    ap.add_argument("--fiscal-year", type=int, default=2025)
+    ap.add_argument(
+        "--report-type",
+        choices=["annual", "semiannual"],
+        default="annual",
+    )
+    ap.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="显式重试 failed；默认只处理 discovered",
+    )
     ap.add_argument("--write", action="store_true")
     args = ap.parse_args()
     terms = load_terms(args.sample)
-    params = {
-        "select": "report_id,code,name,title,pdf_url,status",
-        "order": "publish_date.desc", "limit": str(args.limit),
-    }
-    if args.report_id:
-        params["report_id"] = f"in.({','.join(args.report_id)})"
-    else:
-        params["status"] = "in.(discovered,failed)"
-        params["code"] = f"in.({','.join(terms)})"
+    params = build_report_query(
+        terms,
+        args.limit,
+        args.report_id,
+        retry_failed=args.retry_failed,
+        fiscal_year=args.fiscal_year,
+        report_type=args.report_type,
+    )
     reports = sb_select("periodic_reports", params)
     summary = []
     OUTPUT_DIR.mkdir(exist_ok=True)
     for i, report in enumerate(reports, 1):
         rid = report["report_id"]
         log(f"[{i}/{len(reports)}] {report.get('name')} | {report.get('title')}")
+        claim_report(rid, args.write)
         content = cninfo.download_pdf(report["pdf_url"])
         if not content:
             warn("PDF 下载失败")

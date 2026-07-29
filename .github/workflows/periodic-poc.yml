@@ -1,6 +1,6 @@
 name: Periodic Reports POC
 
-# M4a 小样本手动管线。默认步骤都不调用 LLM；extract 需二次显式确认。
+# M4 年报小批量管线：手动模式保留显式确认，定时模式处理 120 家优先池。
 on:
   workflow_dispatch:
     inputs:
@@ -25,6 +25,13 @@ on:
         required: false
         default: false
         type: boolean
+      retry_failed:
+        description: 'locate 时显式重试 failed'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '45 22,4,10,16 * * *'
 
 concurrency:
   group: cninfo
@@ -32,11 +39,12 @@ concurrency:
 
 jobs:
   periodic-poc:
+    if: ${{ github.event_name != 'schedule' || vars.PERIODIC_AUTO_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
       LLM_THINKING: 'off'
-      SAMPLE_FILE: ${{ inputs.sample_set == 'validation6' && 'config/annual_validation_2025.csv' || inputs.sample_set == 'priority120' && 'config/annual_priority_2025.csv' || 'config/annual_poc_2025.csv' }}
+      SAMPLE_FILE: ${{ github.event_name == 'schedule' && 'config/annual_priority_2025.csv' || inputs.sample_set == 'validation6' && 'config/annual_validation_2025.csv' || inputs.sample_set == 'priority120' && 'config/annual_priority_2025.csv' || 'config/annual_poc_2025.csv' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -44,33 +52,51 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - name: Discover 2025 annual reports
-        if: inputs.stage == 'metadata'
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'metadata'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/fetch_periodic_reports.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --write
-      - name: Locate candidate pages (no LLM)
-        if: inputs.stage == 'locate'
+      - name: Locate candidate pages manually (no LLM)
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'locate'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scripts/locate_periodic_pages.py --sample "$SAMPLE_FILE" --limit "${{ inputs.limit }}" --write
+          BATCH_LIMIT: ${{ inputs.limit }}
+          RETRY_FAILED: ${{ inputs.retry_failed }}
+        run: |
+          EXTRA_ARGS=()
+          if [ "$RETRY_FAILED" = "true" ]; then EXTRA_ARGS+=(--retry-failed); fi
+          python scripts/locate_periodic_pages.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --limit "$BATCH_LIMIT" --write "${EXTRA_ARGS[@]}"
       - name: Guard LLM confirmation
-        if: inputs.stage == 'extract' && !inputs.confirm_llm
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'extract' && !inputs.confirm_llm
         run: |
           echo "extract 阶段必须勾选 confirm_llm"
           exit 2
-      - name: Extract annual reports (LLM)
-        if: inputs.stage == 'extract' && inputs.confirm_llm
+      - name: Extract annual reports manually (LLM)
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'extract' && inputs.confirm_llm
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-        run: python scripts/extract_periodic_reports.py --sample "$SAMPLE_FILE" --limit "${{ inputs.limit }}" --confirm-llm
+        run: python scripts/extract_periodic_reports.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --limit "${{ inputs.limit }}" --confirm-llm
+      - name: Auto-locate priority reports (no LLM)
+        if: github.event_name == 'schedule'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/locate_periodic_pages.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --limit 12 --write
+      - name: Auto-extract priority reports (LLM)
+        if: github.event_name == 'schedule'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: python scripts/extract_periodic_reports.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --limit 6 --confirm-llm
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: periodic-poc-${{ inputs.stage }}-${{ github.run_id }}
+          name: periodic-${{ github.event_name }}-${{ github.run_id }}
           path: output/*
           if-no-files-found: ignore
           retention-days: 30
