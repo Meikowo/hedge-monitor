@@ -69,5 +69,5 @@
 - [x] Run JavaScript syntax checks, annual-report Python tests, frontend logic/structure tests, demo regression tests, and the real public API bootstrap test.
 - [x] Verify locally that 锐新科技 shows purchase `3,505.10 万元`, sale `3,558.64 万元`, and fair-value-change P&L `53.54 万元`.
 - [x] Document the aggregation rule, export behavior, rollout gate, 2025 report counts, and measured timing.
-- [ ] Publish only reviewed frontend, tests, spec/plan, project documentation, and worklog files as a non-force fast-forward to `main`.
-- [ ] Wait for GitHub Pages and verify the production asset version, 锐新科技 values, filters, evidence drawer, and CSV export.
+- [x] Publish only reviewed frontend, tests, spec/plan, project documentation, and worklog files as a non-force fast-forward to `main`.
+- [x] Wait for GitHub Pages and verify the production asset version, 锐新科技 values, filters, evidence drawer, and CSV export.
