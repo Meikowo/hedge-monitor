@@ -409,61 +409,23 @@
     updateViewChrome();
     if (state.view === "dashboard") renderDashboard();
     else if (state.view === "events") renderEvents();
-    else renderAnnouncements();
+    else if (state.view === "announcements") renderAnnouncements();
   }
 
   function updateViewChrome() {
     const isDashboard = state.view === "dashboard";
     const isEvents = state.view === "events";
-    $("#page-title").textContent = isDashboard ? "数据看板" : isEvents ? "套保事件" : "公告原流";
-    $("#page-subtitle").textContent = isDashboard ? "公司覆盖、事件结构与字段质量" : isEvents ? "按公司、年度与类别聚合" : "结构化公告与证据记录";
-    $("#breadcrumb-view").textContent = isDashboard ? "看板" : isEvents ? "事件" : "公告";
+    const isAnnouncements = state.view === "announcements";
+    const isActuals = state.view === "actuals";
+    $("#page-title").textContent = isDashboard ? "数据看板" : isEvents ? "套保事件" : isAnnouncements ? "公告原流" : "计划与实际";
+    $("#page-subtitle").textContent = isDashboard ? "公司覆盖、事件结构与字段质量" : isEvents ? "按公司、年度与类别聚合" : isAnnouncements ? "结构化公告与证据记录" : "定期报告实际情况、损益与套期会计";
+    $("#breadcrumb-view").textContent = isDashboard ? "看板" : isEvents ? "事件" : isAnnouncements ? "公告" : "计划与实际";
     $$('[data-view]').forEach((button) => button.classList.toggle("is-active", button.dataset.view === state.view));
     $("#dashboard-view").hidden = !isDashboard;
-    $("#data-panel").hidden = isDashboard;
-    $("#metric-grid").hidden = state.view === "announcements";
-    $("#clear-filters").hidden = isDashboard;
-    $("#events-table-wrap").hidden = !isEvents;
-    $("#announcements-table-wrap").hidden = isEvents || isDashboard;
-    $("#error-state").hidden = true;
-  }
-
-  function renderEvents() {
-    const rows = filteredEvents();
-    const pageRows = pageSlice(rows);
-    $("#events-body").innerHTML = pageRows.length ? pageRows.map((event) => {
-      const quota = representativeQuota(event);
-      const scopeTags = asArray(event.scope).slice(0, 2).map((item) => `<span class="tag ${item === "综合" ? "tag--dark" : ""}">${escapeHtml(item)}</span>`).join("") || '<span class="tag">其他</span>';
-      const instrumentLine = [joinValues(event.underlyings, "", "、"), joinValues(event.instruments, "", "、")].filter(Boolean).join(" · ") || "未披露";
-      const selected = state.selectedEventKey === event.event_key ? " is-selected" : "";
-      return `<tr class="data-row${selected}" tabindex="0" data-event-key="${escapeHtml(event.event_key)}" aria-label="打开 ${escapeHtml(event.name || "公司")} 事件详情">
-        <td class="date-cell" data-label="最新披露"><span class="cell-primary">${escapeHtml(formatDate(event.latest_ann_date, true))}</span><span class="cell-secondary">${escapeHtml(event.anchor_year || "—")} 年度</span></td>
-        <td class="company-cell" data-label="公司"><span class="cell-primary">${escapeHtml(event.name || "未命名公司")}</span><span class="cell-secondary">${escapeHtml(event.code || "—")} · ${escapeHtml(event.ind_l1 || "行业未录入")}</span></td>
-        <td data-label="省份"><span class="cell-primary">${escapeHtml(event.province || "未录入")}</span></td>
-        <td data-label="类别"><div class="tag-list">${scopeTags}</div></td>
-        <td data-label="阶段"><span class="cell-primary">${escapeHtml(event.stage || "套保事件")}</span><span class="cell-secondary">${escapeHtml(event.approval_level || "审批未披露")}</span></td>
-        <td data-label="品种 / 工具"><span class="cell-primary">${escapeHtml(instrumentLine)}</span><span class="cell-secondary">${escapeHtml(event.venue || "场所未披露")}</span></td>
-        <td class="amount-cell" data-label="额度"><span class="cell-primary">${escapeHtml(quota.amount)}</span><span class="cell-secondary">${escapeHtml([quota.basis, quota.extra].filter(Boolean).join(" · "))}</span></td>
-        <td data-label="期限"><span class="cell-primary">${escapeHtml(event.period_text || "未披露")}</span><span class="cell-secondary">${event.is_revolving ? "额度循环使用" : "非循环或未说明"}</span></td>
-        <td data-label="证据"><button class="evidence-link" type="button" data-event-key="${escapeHtml(event.event_key)}">${escapeHtml(event.ann_count || 0)} 条</button></td>
-      </tr>`;
-    }).join("") : '<tr class="empty-row"><td colspan="9">没有匹配的事件，请调整搜索或筛选条件。</td></tr>';
-    renderResultMeta(rows.length);
-    renderPagination(rows.length);
-    updateSortButtons();
-  }
-
-  function renderAnnouncements() {
-    const rows = filteredAnnouncements();
-    const pageRows = pageSlice(rows);
-    $("#announcements-body").innerHTML = pageRows.length ? pageRows.map((row) => {
-      const scopes = asArray(row.scope).slice(0, 2).map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || '<span class="tag">其他</span>';
-      const evidenceCount = asArray(row.evidence).length;
-      return `<tr class="data-row" tabindex="0" data-ann-id="${escapeHtml(row.ann_id)}" aria-label="打开 ${escapeHtml(row.title || "公告")} 详情">
-        <td class="date-cell" data-label="披露日期"><span class="cell-primary">${escapeHtml(formatDate(row.ann_date))}</span></td>
-        <td class="company-cell" data-label="公司"><span class="cell-primary">${escapeHtml(row.name || "未命名公司")}</span><span class="cell-secondary">${escapeHtml(row.code || "—")}</span></td>
-        <td data-label="省份"><span class="cell-primary">${escapeHtml(row.province || "未录入")}</span></td>
-        <td data-label="公告标题"><span class="cell-primary">${escapeHtml(row.title || "未命名公告")}</span><span class="cell-secondary">${escapeHtml(row.summary || "暂无摘要")}</span></td>
+    $("#periodic-view").hidden = !isActuals;
+    $("#data-panel").hidden = isDashboard || isActuals;
+    $("#metric-grid").hidden = isAnnouncements || isActuals;
+   …1046 tokens truncated…ass="cell-secondary">${escapeHtml(row.summary || "暂无摘要")}</span></td>
         <td data-label="角色"><span class="cell-primary">${escapeHtml(row.ann_role || "其他")}</span><span class="cell-secondary">${escapeHtml(row.approval_level || "审批未披露")}</span></td>
         <td data-label="类别"><div class="tag-list">${scopes}</div></td>
         <td data-label="置信度"><span class="cell-primary">${escapeHtml(percent(row.confidence))}</span></td>
@@ -641,6 +603,17 @@
       updateViewChrome();
       try { await ensureAnnouncements(); } catch (_) { return; }
     }
+    if (view === "actuals") {
+      updateViewChrome();
+      try {
+        await window.HedgePeriodic?.activate();
+      } catch (error) {
+        const target = $("#periodic-error");
+        if (target) target.hidden = false;
+        const message = $("#periodic-error-message");
+        if (message) message.textContent = error?.message || "定期报告数据读取失败";
+      }
+    }
     renderCurrentView();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -716,6 +689,11 @@
     $("#clear-filters").addEventListener("click", clearFilters);
     $("#export-button").addEventListener("click", exportCurrentResults);
     $("#refresh-button").addEventListener("click", async () => {
+      if (state.view === "actuals") {
+        await window.HedgePeriodic?.refresh();
+        showToast("定期报告数据已刷新");
+        return;
+      }
       state.announcements = null;
       await loadCoreData();
       showToast("数据已刷新");
@@ -792,6 +770,16 @@
   window.addEventListener("error", (event) => handleFatalError(event.error || new Error(event.message || "页面脚本加载失败")));
   window.addEventListener("unhandledrejection", (event) => handleFatalError(event.reason || new Error("数据请求未能完成")));
 
+  window.HedgeShell = Object.freeze({
+    apiAll,
+    escapeHtml,
+    safeExternalUrl,
+    openDrawer,
+    closeDrawer,
+    events: () => state.events.slice(),
+    showToast
+  });
+
   try {
     bindEvents();
     loadCoreData();
@@ -799,3 +787,4 @@
     handleFatalError(error);
   }
 })();
+

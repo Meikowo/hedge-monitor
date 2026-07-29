@@ -6,9 +6,10 @@
     <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="A 股上市公司套期保值事件与公告数据终端" />
     <title>Hedge Monitor · 套保事件</title>
-    <link rel="stylesheet" href="styles.css?v=20260721-2" />
-    <script src="config.js?v=20260721-2"></script>
-    <script src="app.js?v=20260721-2" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260729-1" />
+    <script src="config.js?v=20260729-1"></script>
+    <script src="app.js?v=20260729-1" defer></script>
+    <script type="module" src="periodic.js?v=20260729-1"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -31,6 +32,9 @@
           </button>
           <button class="side-link" type="button" data-view="announcements">
             <span>公告原流</span><strong id="nav-announcements-count">—</strong>
+          </button>
+          <button class="side-link" type="button" data-view="actuals">
+            <span>计划与实际</span><strong id="nav-periodic-count">—</strong>
           </button>
         </nav>
 
@@ -152,6 +156,102 @@
                 </header>
                 <div class="quality-grid" id="quality-chart"></div>
               </article>
+            </div>
+          </section>
+
+          <section class="periodic-view" id="periodic-view" hidden>
+            <div class="periodic-summary" id="periodic-summary" aria-label="定期报告数据概览">
+              <article><span>结构化报告</span><strong id="periodic-report-count">—</strong></article>
+              <article><span>覆盖公司</span><strong id="periodic-company-count">—</strong></article>
+              <article><span>数值事实</span><strong id="periodic-metric-count">—</strong></article>
+              <article><span>套期会计已应用</span><strong id="periodic-accounting-count">—</strong></article>
+            </div>
+
+            <div class="periodic-panel">
+              <div class="periodic-filters">
+                <label class="search-field">
+                  <span class="search-mark" aria-hidden="true"></span>
+                  <input id="periodic-search" type="search" placeholder="搜索公司、代码、品种或工具" autocomplete="off" />
+                </label>
+                <label class="select-field">
+                  <span>报告年度</span>
+                  <select id="periodic-year-filter"><option value="all">全部</option></select>
+                </label>
+                <label class="select-field">
+                  <span>类别</span>
+                  <select id="periodic-scope-filter">
+                    <option value="all">全部</option>
+                    <option value="商品">商品</option>
+                    <option value="外汇">外汇</option>
+                    <option value="利率">利率</option>
+                    <option value="综合">综合</option>
+                    <option value="未明确">未明确</option>
+                  </select>
+                </label>
+                <label class="select-field">
+                  <span>套期会计</span>
+                  <select id="periodic-accounting-filter">
+                    <option value="all">全部</option>
+                    <option value="已应用">已应用</option>
+                    <option value="未应用">未应用</option>
+                    <option value="混合应用">混合应用</option>
+                    <option value="未明确披露">未明确披露</option>
+                    <option value="需复核">需复核</option>
+                  </select>
+                </label>
+                <label class="select-field">
+                  <span>证据</span>
+                  <select id="periodic-evidence-filter">
+                    <option value="all">全部</option>
+                    <option value="完整">完整</option>
+                    <option value="部分">部分</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="periodic-toolbar">
+                <div>
+                  <strong id="periodic-result-count">—</strong>
+                  <span>一行表示公司 × 报告期 × 类别</span>
+                </div>
+                <span>公告与年报口径匹配将在 M5 启用</span>
+              </div>
+
+              <div id="periodic-loading" class="state-panel" hidden>
+                <span class="loader" aria-hidden="true"></span>
+                <strong>正在读取定期报告数据</strong>
+                <span>首次进入时加载报告、数值与套期会计证据</span>
+              </div>
+              <div id="periodic-error" class="state-panel state-panel--error" hidden>
+                <strong>定期报告数据暂时无法读取</strong>
+                <span id="periodic-error-message">请稍后重试。</span>
+              </div>
+
+              <div id="periodic-table-wrap" class="table-scroll periodic-table-scroll" hidden>
+                <table class="data-table periodic-table">
+                  <thead>
+                    <tr>
+                      <th>报告期</th>
+                      <th>公司</th>
+                      <th>类别 / 品种</th>
+                      <th>公告计划</th>
+                      <th>实际交易流量</th>
+                      <th>期末保证金</th>
+                      <th>衍生金融资产</th>
+                      <th>衍生金融负债</th>
+                      <th>公允价值净额</th>
+                      <th>综合损益</th>
+                      <th>处置投资收益</th>
+                      <th>公允价值变动</th>
+                      <th>套期会计</th>
+                      <th>方法</th>
+                      <th>匹配状态</th>
+                      <th>证据</th>
+                    </tr>
+                  </thead>
+                  <tbody id="periodic-body"></tbody>
+                </table>
+              </div>
             </div>
           </section>
 
@@ -285,3 +385,4 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>
+

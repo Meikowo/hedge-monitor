@@ -223,6 +223,11 @@ def extract_explicit_pnl_metrics(body: str) -> list[dict]:
     for page_match in page_blocks:
         page = int(page_match.group("page"))
         page_body = page_match.group("body")
+        page_body = re.sub(
+            r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])",
+            "",
+            page_body,
+        )
         for match in pnl_pattern.finditer(page_body):
             value = float(
                 match.group("value").replace("âˆ’", "-").replace(" ", "").replace(",", "")
@@ -304,6 +309,44 @@ def extract_explicit_pnl_metrics(body: str) -> list[dict]:
                 "metric_type": "reported_derivative_comprehensive_pnl",
                 "fact_level": "report",
                 "scope": None,
+                "underlying": None,
+                "value": value,
+                "currency": "USD" if "ç¾å…ƒ" in unit else "CNY",
+                "unit": unit,
+                "time_basis": "period",
+                "source_section": "æŠ¥å‘ŠæœŸå®é™…æŸç›Šæƒ…å†µ",
+                "account_name": None,
+                "is_restricted": None,
+                "counterparty": None,
+                "raw": match.group("raw"),
+                "page": page,
+            })
+        actual_loss_pattern = re.compile(
+            r"æŠ¥å‘ŠæœŸå®é™…æŸç›Šæƒ…å†µçš„è¯´æ˜\s*"
+            r"(?P<raw>(?:æŠ¥å‘ŠæœŸå†…[ï¼Œ,]?\s*)?"
+            r"(?P<label>[^ã€‚\n]{0,40}?)"
+            r"(?:å®é™…äº§ç”ŸæŸç›Š|ç¡®è®¤æŠ•èµ„æ”¶ç›Š)\s*(?:ä¸º)?\s*"
+            r"(?P<value>[-âˆ’]?\s*[0-9][0-9,]*(?:\.[0-9]+)?)\s*"
+            r"(?P<unit>äº¿ç¾å…ƒ|ä¸‡ç¾å…ƒ|ç¾å…ƒ|äº¿å…ƒ|ä¸‡å…ƒ|åƒå…ƒ|å…ƒ))"
+        )
+        for match in actual_loss_pattern.finditer(page_body):
+            label = match.group("label")
+            if "åˆ©ç‡" in label:
+                scope = "åˆ©ç‡"
+            elif "æœŸè´§" in label or "å•†å“" in label:
+                scope = "å•†å“"
+            elif any(term in label for term in ("è¿œæœŸ", "å¤–æ±‡", "æ±‡ç‡", "è´§å¸")):
+                scope = "å¤–æ±‡"
+            else:
+                scope = None
+            value = float(
+                match.group("value").replace("âˆ’", "-").replace(" ", "").replace(",", "")
+            )
+            unit = match.group("unit")
+            metrics.append({
+                "metric_type": "reported_derivative_comprehensive_pnl",
+                "fact_level": "scope" if scope else "report",
+                "scope": scope,
                 "underlying": None,
                 "value": value,
                 "currency": "USD" if "ç¾å…ƒ" in unit else "CNY",
@@ -398,4 +441,574 @@ def load_sample_codes(path: str) -> list[str]:
 
 
 def merge_pass_results(profile: dict, metric_results: dict[str, dict]) -> dict:
-    """åˆå¹¶çŸ­è¾“å‡ºæ‰¹æ¬¡ï¼Œå¹¶æ‹’ç»æ¨¡å‹è¶Šè¿‡å½“å‰æ‰¹æ¬¡çš„ metric_typeã€‚"ã^û¶‰ËkºwµçM½Õ¹Ñ¥¹}ÍÑ…ÑÕÌ€ô€‹šr«–êSR ˆ(€€€€€€€…½Õ¹Ñ¥¹}ÑåÁ•Ì€ômt(€€€€€€€±•…å}…½Õ¹Ñ¥¹œ€ômt(€€€€€€€…½Õ¹Ñ¥¹}Á…”€ô¡•­‰½á}Á…”(€€€€€€€…½Õ¹Ñ¥¹}ÅÕ½Ñ”€ô¡•­‰½á}ÅÕ½Ñ”(€€€€€€€É•ÍÕ±Ğ€ôì¨©É•ÍÕ±Ğ°€‰¹½¹}…ÁÁ±¥…Ñ¥½¹}É•…Í½¸ˆè9½¹•ô(€€€¹½Éµ…±¥é•‘}Í½Á•Ì€ômà™½Èà¥¸}±¥ÍĞ¡É•ÍÕ±Ğ¹•Ğ ‰Í½Á•Ìˆ¤¤¥˜à¥¸M=AMt(€€€¹½¹}…ÁÁ±¥…Ñ¥½¹}É•…Í½¸€ôÉ•ÍÕ±Ğ¹•Ğ ‰¹½¹}…ÁÁ±¥…Ñ¥½¹}É•…Í½¸ˆ¤½È9½¹”(€€€Ñ½À€ôì(€€€€€€€€‰‘¥Í±½ÍÕÉ•}ÍÑ…ÑÕÌˆèÍÑ…ÑÕÌ°(€€€€€€€€‰Í½Á•Ìˆè¹½Éµ…±¥é•‘}Í½Á•Ì°(€€€€€€€€‰¥¹ÍÑÉÕµ•¹ÑÌˆè}±¥ÍĞ¡É•ÍÕ±Ğ¹•Ğ ‰¥¹ÍÑÉÕµ•¹ÑÌˆ¤¤°(€€€€€€€€‰Õ¹‘•É±å¥¹Ìˆè}±¥ÍĞ¡É•ÍÕ±Ğ¹•Ğ ‰Õ¹‘•É±å¥¹Ìˆ¤¤°(€€€€€€€€‰ÁÕÉÁ½Í”ˆè€¡É•ÍÕ±Ğ¹•Ğ ‰ÁÕÉÁ½Í”ˆ¤½È9½¹”¤°(€€€€€€€€‰¡•‘•}…½Õ¹Ñ¥¹œˆè±•…å}…½Õ¹Ñ¥¹œ½È…½Õ¹Ñ¥¹}ÑåÁ•Ì°(€€€€€€€€‰¡•‘•}…½Õ¹Ñ¥¹}ÍÑ…ÑÕÌˆè…½Õ¹Ñ¥¹}ÍÑ…ÑÕÌ°(€€€€€€€€‰¡•‘•}…½Õ¹Ñ¥¹}ÑåÁ•Ìˆè…½Õ¹Ñ¥¹}ÑåÁ•Ì°(€€€€€€€€‰¹½¹}…ÁÁ±¥…Ñ¥½¹}É•…Í½¸ˆè¹½¹}…ÁÁ±¥…Ñ¥½¹}É•…Í½¸°(€€€€€€€€‰¡•‘•}…½Õ¹Ñ¥¹}Á…”ˆè…½Õ¹Ñ¥¹}Á…”°(€€€€€€€€‰¡•‘•}…½Õ¹Ñ¥¹}ÅÕ½Ñ”ˆè…½Õ¹Ñ¥¹}ÅÕ½Ñ”°(€€€€€€€€‰¡•‘•}…½Õ¹Ñ¥¹}ÅÕ½Ñ•}Ù•É¥™¥•ˆè€ (€€€€€€€€€€€Ù•É¥™å}ÅÕ½Ñ”¡…½Õ¹Ñ¥¹}ÅÕ½Ñ”°‰½‘ä¤¥˜…½Õ¹Ñ¥¹}ÅÕ½Ñ”•±Í”9½¹”(€€€€€€€€¤°(€€€€€€€€‰ÍÕµµ…Éäˆè¹½Éµ…±¥é•}ÍÕµµ…Éä (€€€€€€€€€€€É•ÍÕ±Ğ¹•Ğ ‰ÍÕµµ…Éäˆ¤°(€€€€€€€€€€€¹½Éµ…±¥é•‘}Í½Á•Ì°(€€€€€€€€€€€ÍÑ…ÑÕÌ°(€€€€€€€€€€€…½Õ¹Ñ¥¹}ÍÑ…ÑÕÌ°(€€€€€€€€€€€¹½¹}…ÁÁ±¥…Ñ¥½¹}É•…Í½¸°(€€€€€€€€¤°(€€€€€€€€‰•Ù¥‘•¹”ˆèÉ•ÍÕ±Ğ¹•Ğ ‰•Ù¥‘•¹”ˆ¤¥˜¥Í¥¹ÍÑ…¹”¡É•ÍÕ±Ğ¹•Ğ ‰•Ù¥‘•¹”ˆ¤°±¥ÍĞ¤•±Í”mt°(€€€€€€€€‰½¹™¥‘•¹”ˆè™±½…Ğ¡É•ÍÕ±Ñl‰½¹™¥‘•¹”‰t¤¥˜¥Í¥¹ÍÑ…¹”¡É•ÍÕ±Ğ¹•Ğ ‰½¹™¥‘•¹”ˆ¤°€¡¥¹Ğ°™±½…Ğ¤¤•±Í”9½¹”°(€€€€€€€€‰µ½‘•°ˆè•¹Ø ‰115}5=0ˆ°€‰5¥¹¥5…àµ4Ìˆ¤°€‰ÁÉ½µÁÑ}Ù•ÉÍ¥½¸ˆèÁÀ¹AI=5AQ}YIM%=8°(€€€€€€€€‰•áÑÉ…Ñ•‘}…Ğˆè‘Ğ¹‘…Ñ•Ñ¥µ”¹¹½Ü¡‘Ğ¹Ñ¥µ•é½¹”¹ÕÑŒ¤¹¥Í½™½Éµ…Ğ ¤°(€€€ô(€€€¡…Í}Ù•É¥™¥•‘}‰ÕÍ¥¹•ÍÍ}Ñ…‰±”€ô…¹ä (€€€€€€€¥Í¥¹ÍÑ…¹”¡¥Ñ•´°‘¥Ğ¤(€€€€€€€…¹¥Ñ•´¹•Ğ ‰Ñ…‰±•}•±±}Ù•É¥™¥•ˆ¤¥ÌQÉÕ”(€€€€€€€…¹¥Ñ•´¹•Ğ ‰Í½ÕÉ•}Í•Ñ¥½¸ˆ¤€ôô€‹¢†7R–Nš*W¢Öš–Ôˆ(€€€€€€€™½È¥Ñ•´¥¸€¡É•ÍÕ±Ğ¹•Ğ ‰µ•ÑÉ¥Ìˆ¤½Èmt¤(€€€€¤(€€€¡…Í}Ù•É¥™¥•‘}•áÁ±¥¥Ñ}‘•É¥Ù…Ñ¥Ù•}¹½Ñ”€ô…¹ä (€€€€€€€¥Í¥¹ÍÑ…¹”¡¥Ñ•´°‘¥Ğ¤(€€€€€€€…¹¥Ñ•´¹•Ğ ‰Ñ…‰±•}•±±}Ù•É¥™¥•ˆ¤¥ÌQÉÕ”(€€€€€€€…¹¥Ñ•´¹•Ğ ‰Í½ÕÉ•}Í•Ñ¥½¸ˆ¤¥¸ì(€€€€€€€€€€€€‹š*W¢ÖšRÛn(ˆ°(€€€€€€€€€€€€‹–³–’îß–ó–>c–*£šRÛn(ˆ°(€€€€€€€€€€€€‹–³–’îß–óš*¯¦rÈˆ°(€€€€€€€ô(€€€€€€€…¹…¹ä (€€€€€€€€€€€µ…É­•È¥¸ÍÑÈ¡¥Ñ•´¹•Ğ ‰É…Üˆ¤½È€ˆˆ¤(€€€€€€€€€€€™½Èµ…É­•È¥¸€ ‹¢†7R¦G¢z7–Ş—–Üˆ°€‹¢†7R¦G¢z7¢Ö’êœˆ°€‹¢†7R¦G¢z7¢Ò–èˆ¤(€€€€€€€€¤(€€€€€€€™½È¥Ñ•´¥¸€¡É•ÍÕ±Ğ¹•Ğ ‰µ•ÑÉ¥Ìˆ¤½Èmt¤(€€€€¤(€€€µ•ÑÉ¥Ìè±¥ÍÑm‘¥Ñt€ômt(€€€™½ÈÉ…İ}¥Ñ•´¥¸É•ÍÕ±Ğ¹•Ğ ‰µ•ÑÉ¥Ìˆ¤½Èmtè(€€€€€€€¥˜¹½Ğ¥Í¥¹ÍÑ…¹”¡É…İ}¥Ñ•´°‘¥Ğ¤è(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€Ù…±Õ”€ôÉ…İ}¥Ñ•´¹•Ğ ‰Ù…±Õ”ˆ¤(€€€€€€€Á…”€ôÉ…İ}¥Ñ•´¹•Ğ ‰Á…”ˆ¤(€€€€€€€ÅÕ½Ñ”€ôÍÑÈ¡É…İ}¥Ñ•´¹•Ğ ‰É…Üˆ¤½È€ˆˆ¥lèÈĞÁt(€€€€€€€¥˜¹½Ğ¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°€¡¥¹Ğ°™±½…Ğ¤¤½È¹½Ğ¥Í¥¹ÍÑ…¹”¡Á…”°¥¹Ğ¤½ÈÁ…”€ğô€À½È¹½ĞÅÕ½Ñ”è(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€Í½ÕÉ•}Í•Ñ¥½¸€ôÍÑÈ¡É…İ}¥Ñ•´¹•Ğ ‰Í½ÕÉ•}Í•Ñ¥½¸ˆ¤½È€ˆˆ¤(€€€€€€€…½Õ¹Ñ}¹…µ”€ôÍÑÈ¡É…İ}¥Ñ•´¹•Ğ ‰…½Õ¹Ñ}¹…µ”ˆ¤½È€ˆˆ¤(€€€€€€€µ•ÑÉ¥}ÑåÁ”€ô¹½Éµ…±¥é•}µ•ÑÉ¥}ÑåÁ” (€€€€€€€€€€€ÍÑÈ¡É…İ}¥Ñ•´¹•Ğ ‰µ•ÑÉ¥}ÑåÁ”ˆ¤½È€ˆˆ¤°(€€€€€€€€€€€ÅÕ½Ñ”°(€€€€€€€€€€€Í½ÕÉ•}Í•Ñ¥½¸°(€€€€€€€€€€€…½Õ¹Ñ}¹…µ”°(€€€€€€€€¤(€€€€€€€¥˜µ•ÑÉ¥}ÑåÁ”¹½Ğ¥¸5QI%Lè(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€‘•É¥Ù…Ñ¥Ù•}½¹Ñ•áĞ€ô€ˆ€ˆ¹©½¥¸ ¡ÅÕ½Ñ”°Í½ÕÉ•}Í•Ñ¥½¸°…½Õ¹Ñ}¹…µ”¤¤(€€€€€€€¥˜€ (€€€€€€€€€€€µ•ÑÉ¥}ÑåÁ”€ôô€‰‘•É¥Ù…Ñ¥Ù•}‘¥ÍÁ½Í…±}¥¹Ù•ÍÑµ•¹Ñ}¥¹½µ”ˆ(€€€€€€€€€€€…¹¹½Ğ…¹ä (€€€€€€€€€€€€€€€µ…É­•È¥¸‘•É¥Ù…Ñ¥Ù•}½¹Ñ•áĞ(€€€€€€€€€€€€€€€™½Èµ…É­•È¥¸€ (€€€€€€€€€€€€€€€€€€€€‹¢†7R|ˆ°€‹šr¢Òœˆ°€‹šršvˆ°€‹¢şsšr|ˆ°€‹š:'šr|ˆ°€‹’êKš6ˆˆ°€‹––_šr|ˆ°€‰P­ˆ°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤(€€€€€€€€¤è(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€¥˜µ•ÑÉ¥}ÑåÁ”€ôô€‰µ…É¥¹}•¹‘}…Í ˆè(€€€€€€€€€€€¥˜€‹¦î¦G¢Öˆ¥¸‘•É¥Ù…Ñ¥Ù•}½¹Ñ•áĞ½È€‹–¦î¦Dˆ¥¸‘•É¥Ù…Ñ¥Ù•}½¹Ñ•áĞè(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€€€€€¥˜¹½Ğ…¹ä (€€€€€€€€€€€€€€€µ…É­•È¥¸‘•É¥Ù…Ñ¥Ù•}½¹Ñ•áĞ(€€€€€€€€€€€€€€€™½Èµ…É­•È¥¸€ (€€€€€€€€€€€€€€€€€€€€‹¢†7R|ˆ°€‹šr¢Òœˆ°€‹šršvˆ°€‹¢şsšr|ˆ°€‹îO–R»šÆˆ°€‹š:'šr|ˆ°€‹’êKš6ˆˆ°€‰P­ˆ°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤è(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€Ù…±Õ”°Õ¹¥Ğ€ôÉ•ÍÑ½É•}±¥Ñ•É…±}Í…±”¡Ù…±Õ”°É…İ}¥Ñ•´¹•Ğ ‰Õ¹¥Ğˆ¤°ÅÕ½Ñ”¤(€€€€€€€Ù…±Õ•}Ù•É¥™¥•€ôÙ•É¥™å}É…İ}Ù…±Õ”¡Ù…±Õ”°ÅÕ½Ñ”¤(€€€€€€€¥˜™±½…Ğ¡Ù…±Õ”¤€ôô€À…¹¹½Ğé•É½}±¥Ñ•É…±}µ…Ñ¡•Í}Õ¹¥Ğ¡Õ¹¥Ğ°ÅÕ½Ñ”¤è(€€€€€€€€€€€Ù…±Õ•}Ù•É¥™¥•€ô…±Í”(€€€€€€€¥˜™±½…Ğ¡Ù…±Õ”¤€ôô€À…¹¹½ĞÙ…±Õ•}Ù•É¥™¥•è(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€¥˜¹½ĞÙ…±Õ•}Ù•É¥™¥•è(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€Í½Á”€ôÉ…İ}¥Ñ•´¹•Ğ ‰Í½Á”ˆ¤¥˜É…İ}¥Ñ•´¹•Ğ ‰Í½Á”ˆ¤¥¸M=AL•±Í”9½¹”(€€€€€€€¥¹™•ÉÉ•‘}Í½Á”€ô…±Í”(€€€€€€€¥˜µ•ÑÉ¥}ÑåÁ”¥¸ì(€€€€€€€€€€€€‰É•Á½ÉÑ•‘}‘•É¥Ù…Ñ¥Ù•}½µÁÉ•¡•¹Í¥Ù•}Á¹°ˆ°(€€€€€€€€€€€€‰‘•É¥Ù…Ñ¥Ù•}‘¥ÍÁ½Í…±}¥¹Ù•ÍÑµ•¹Ñ}¥¹½µ”ˆ°(€€€€€€€ô…¹Í½Á”¥Ì9½¹”è(€€€€€€€€€€€¡…Í}½µµ½‘¥Ñä€ô…¹ä (€€€€€€€€€€€€€€€Ñ•É´¥¸‘•É¥Ù…Ñ¥Ù•}½¹Ñ•áĞ™½ÈÑ•É´¥¸€ ‹–V–Nˆ°€‹šr¢Òœˆ°€‰P­ˆ¤(€€€€€€€€€€€€¤(€€€€€€€€€€€¡…Í}™à€ô…¹ä (€€€€€€€€€€€€€€€Ñ•É´¥¸‘•É¥Ù…Ñ¥Ù•}½¹Ñ•áĞ™½ÈÑ•É´¥¸€ ‹–’[šÆˆ°€‹šÆ:ˆ°€‹¢şsšr|ˆ¤(€€€€€€€€€€€€¤(€€€€€€€€€€€¥˜¡…Í}½µµ½‘¥Ñä€„ô¡…Í}™àè(€€€€€€€€€€€€€€€Í½Á”€ô€‹–V–Nˆ¥˜¡…Í}½µµ½‘¥Ñä•±Í”€‹–’[šÆˆ(€€€€€€€€€€€€€€€¥¹™•ÉÉ•‘}Í½Á”€ôQÉÕ”(€€€€€€€Õ¹‘•É±å¥¹œ€ôÉ…İ}¥Ñ•´¹•Ğ ‰Õ¹‘•É±å¥¹œˆ¤½È9½¹”(€€€€€€€™…Ñ}±•Ù•°€ôÉ…İ}¥Ñ•´¹•Ğ ‰™…Ñ}±•Ù•°ˆ¤(€€€€€€€¥˜¥¹™•ÉÉ•‘}Í½Á”…¹™…Ñ}±•Ù•°€ôô€‰É•Á½ÉĞˆè(€€€€€€€€€€€™…Ñ}±•Ù•°€ô€‰Í½Á”ˆ(€€€€€€€¥˜™…Ñ}±•Ù•°¹½Ğ¥¸Q}1Y1Lè(€€€€€€€€€€€™…Ñ}±•Ù•°€ô€‰Õ¹‘•É±å¥¹œˆ¥˜Í½Á”…¹Õ¹‘•É±å¥¹œ•±Í”€ ‰Í½Á”ˆ¥˜Í½Á”•±Í”€‰É•Á½ÉĞˆ¤(€€€€€€€¥˜™…Ñ}±•Ù•°€ôô€‰É•Á½ÉĞˆè(€€€€€€€€€€€Í½Á”€ô9½¹”(€€€€€€€€€€€Õ¹‘•É±å¥¹œ€ô9½¹”(€€€€€€€•±¥˜™…Ñ}±•Ù•°€ôô€‰Õ¹‘•É±å¥¹œˆ…¹¹½ĞÕ¹‘•É±å¥¹œè(€€€€€€€€€€€™…Ñ}±•Ù•°€ô€‰Í½Á”ˆ¥˜Í½Á”•±Í”€‰É•Á½ÉĞˆ(€€€€€€€¥˜™…Ñ}±•Ù•°€ôô€‰Í½Á”ˆè(€€€€€€€€€€€Õ¹‘•É±å¥¹œ€ô9½¹”(€€€€€€€¥˜™…Ñ}±•Ù•°¥¸ì‰Í½Á”ˆ°€‰Õ¹‘•É±å¥¹œ‰ô…¹¹½ĞÍ½Á”è(€€€€€€€€€€€™…Ñ}±•Ù•°€ô€‰É•Á½ÉĞˆ(€€€€€€€€€€€Õ¹‘•É±å¥¹œ€ô9½¹”(€€€€€€€ÅÕ½Ñ•}Ù•É¥™¥•€ô€ (€€€€€€€€€€€QÉÕ”¥˜É…İ}¥Ñ•´¹•Ğ ‰Ñ…‰±•}•±±}Ù•É¥™¥•ˆ¤¥ÌQÉÕ”(€€€€€€€€€€€•±Í”Ù•É¥™å}ÅÕ½Ñ”¡ÅÕ½Ñ”°‰½‘ä¤(€€€€€€€€¤(€€€€€€€¥˜ÅÕ½Ñ•}Ù•É¥™¥•¥Ì¹½ĞQÉÕ”è(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€µ•ÑÉ¥Ì¹…ÁÁ•¹¡ì(€€€€€€€€€€€€‰µ•ÑÉ¥}ÑåÁ”ˆèµ•ÑÉ¥}ÑåÁ”°(€€€€€€€€€€€€‰™…Ñ}±•Ù•°ˆè™…Ñ}±•Ù•°°(€€€€€€€€€€€€‰Í½Á”ˆèÍ½Á”°(€€€€€€€€€€€€‰Õ¹‘•É±å¥¹œˆèÕ¹‘•É±å¥¹œ°(€€€€€€€€€€€€‰Ù…±Õ”ˆè™±½…Ğ¡Ù…±Õ”¤°€‰ÕÉÉ•¹äˆèÉ…İ}¥Ñ•´¹•Ğ ‰ÕÉÉ•¹äˆ¤½È9½¹”°(€€€€€€€€€€€€‰Õ¹¥ĞˆèÕ¹¥Ğ°(€€€€€€€€€€€€‰Ñ¥µ•}‰…Í¥ÌˆèÉ…İ}¥Ñ•´¹•Ğ ‰Ñ¥µ•}‰…Í¥Ìˆ¤¥˜É…İ}¥Ñ•´¹•Ğ ‰Ñ¥µ•}‰…Í¥Ìˆ¤¥¸Q%5}	M%L•±Í”€‰Á•É¥½ˆ°(€€€€€€€€€€€€‰Í½ÕÉ•}Í•Ñ¥½¸ˆèÉ…İ}¥Ñ•´¹•Ğ ‰Í½ÕÉ•}Í•Ñ¥½¸ˆ¤½È9½¹”°(€€€€€€€€€€€€‰…½Õ¹Ñ}¹…µ”ˆèÉ…İ}¥Ñ•´¹•Ğ ‰…½Õ¹Ñ}¹…µ”ˆ¤½È9½¹”°(€€€€€€€€€€€€‰¥Í}É•ÍÑÉ¥Ñ•ˆè€ (€€€€€€€€€€€€€€€É…İ}¥Ñ•´¹•Ğ ‰¥Í}É•ÍÑÉ¥Ñ•ˆ¤(€€€€€€€€€€€€€€€¥˜¥Í¥¹ÍÑ…¹”¡É…İ}¥Ñ•´¹•Ğ ‰¥Í}É•ÍÑÉ¥Ñ•ˆ¤°‰½½°¤•±Í”9½¹”(€€€€€€€€€€€€¤°(€€€€€€€€€€€€‰½Õ¹Ñ•ÉÁ…ÉÑäˆèÉ…İ}¥Ñ•´¹•Ğ ‰½Õ¹Ñ•ÉÁ…ÉÑäˆ¤½È9½¹”°(€€€€€€€€€€€€‰É…İ}Ñ•áĞˆèÅÕ½Ñ”°€‰Á…”ˆèÁ…”°(€€€€€€€€€€€€‰Ù…±Õ•}Ù•É¥™¥•ˆèÙ…±Õ•}Ù•É¥™¥•°(€€€€€€€€€€€€‰ÅÕ½Ñ•}Ù•É¥™¥•ˆèÅÕ½Ñ•}Ù•É¥™¥•°(€€€€€€€€€€€€‰Ù…±Õ•}½É¥¥¸ˆè€‰É•Á½ÉÑ•ˆ°(€€€€€€€ô¤(€€€‘•‘ÕÁ±¥…Ñ•è±¥ÍÑm‘¥Ñt€ômt(€€€Í••¹}µ•ÑÉ¥ÌèÍ•ÑmÑÕÁ±•t€ôÍ•Ğ ¤(€€€™½È¥Ñ•´¥¸µ•ÑÉ¥Ìè(€€€€€€€­•ä€ô€ (€€€€€€€€€€€¥Ñ•µl‰µ•ÑÉ¥}ÑåÁ”‰t°¥Ñ•µl‰™…Ñ}±•Ù•°‰t°¥Ñ•µl‰Í½Á”‰t°(€€€€€€€€€€€¥Ñ•µl‰Õ¹‘•É±å¥¹œ‰t°¥Ñ•µl‰Ù…±Õ”‰t°¥Ñ•µl‰ÕÉÉ•¹ä‰t°¥Ñ•µl‰Õ¹¥Ğ‰t°(€€€€€€€€€€€¥Ñ•µl‰Ñ¥µ•}‰…Í¥Ì‰t°¹½Éµ…±¥é•}…½Õ¹Ñ}­•ä¡¥Ñ•µl‰…½Õ¹Ñ}¹…µ”‰t¤°¥Ñ•µl‰Á…”‰t°(€€€€€€€€¤(€€€€€€€¥˜­•ä¥¸Í••¹}µ•ÑÉ¥Ìè(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€Í••¹}µ•ÑÉ¥Ì¹…‘¡­•ä¤(€€€€€€€‘•‘ÕÁ±¥…Ñ•¹…ÁÁ•¹¡¥Ñ•´¤(€€€µ•ÑÉ¥Ì€ô‘•‘ÕÁ±¥…Ñ•(€€€¥˜µ•ÑÉ¥Ì…¹Ñ½Ál‰‘¥Í±½ÍÕÉ•}ÍÑ…ÑÕÌ‰t¥¸ì‹š>C–>+š^ƒšVÃ–ğˆ°€‹šr«š>C–>(‰ôè(€€€€€€€¡…Í}ÁÉ½™¥±•}¡•‘•}½¹Ñ•áĞ€ô‰½½°¡Ñ½Ál‰Í½Á•Ì‰t½ÈÑ½Ál‰ÁÕÉÁ½Í”‰t¤(€€€€€€€Ñ½Ál‰‘¥Í±½ÍÕÉ•}ÍÑ…ÑÕÌ‰t€ô€‹šr'šVÃ–ğˆ¥˜€ (€€€€€€€€€€€¡…Í}Ù•É¥™¥•‘}‰ÕÍ¥¹•ÍÍ}Ñ…‰±”(€€€€€€€€€€€½È€¡¡…Í}Ù•É¥™¥•‘}•áÁ±¥¥Ñ}‘•É¥Ù…Ñ¥Ù•}¹½Ñ”…¹¡…Í}ÁÉ½™¥±•}¡•‘•}½¹Ñ•áĞ¤(€€€€€€€€¤•±Í”€‹¦r–’7š‚àˆ(€€€É•ÑÕÉ¸Ñ½À°µ•ÑÉ¥Ì(()‘•˜µ…¥¸ ¤€´ø9½¹”è(€€€…À€ô…ÉÁ…ÉÍ”¹ÉÕµ•¹ÑA…ÉÍ•È¡‘•ÍÉ¥ÁÑ¥½¸ô‹–Â?š&ç¦?š*÷–>[–ºkšrš*—–F(ˆ¤(€€€…À¹…‘‘}…ÉÕµ•¹Ğ ˆ´µÍ…µÁ±”ˆ°‘•™…Õ±ĞõÍÑÈ¡I==P€¼€‰½¹™¥œˆ€¼€‰…¹¹Õ…±}Ù…±¥‘…Ñ¥½¹|ÈÀÈÔ¹ÍØˆ¤¤(€€€…À¹…‘‘}…ÉÕµ•¹Ğ ˆ´µ±¥µ¥Ğˆ°ÑåÁ”õ¥¹Ğ°‘•™…Õ±ĞôÄ¤(€€€…À¹…‘‘}…ÉÕµ•¹Ğ ˆ´µÉ•Á½ÉĞµ¥ˆ°…Ñ¥½¸ô‰…ÁÁ•¹ˆ¤(€€€…À¹…‘‘}…ÉÕµ•¹Ğ (€€€€€€€€ˆ´µÁ…ÍÌˆ°(€€€€€€€‘•ÍĞô‰Á…ÍÍ}¹…µ•Ìˆ°(€€€€€€€…Ñ¥½¸ô‰…ÁÁ•¹ˆ°(€€€€€€€¡½¥•Ìõl‰ÁÉ½™¥±”ˆ°€©ÁÀ¹5QI%}5%1%Mt°(€€€€€€€¡•±Àô‹–>«š&Ÿ¢†3š2–ºk~·š&çš²‡¾òo–>¿¦7–’7’òƒ–—¦îc¢º“š&Ÿ¢†3–£¦£ˆ°(€€€€¤(€€€…À¹…‘‘}…ÉÕµ•¹Ğ ˆ´µ½¹™¥É´µ±±´ˆ°…Ñ¥½¸ô‰ÍÑ½É•}ÑÉÕ”ˆ°¡•±Àô‹†»¢º“šr³š²‡’òk’êŸRš¢‡–z/¢ÂR ˆ¤(€€€…À¹…‘‘}…ÉÕµ•¹Ğ ˆ´µ‘ÉäµÉÕ¸ˆ°…Ñ¥½¸ô‰ÍÑ½É•}ÑÉÕ”ˆ°¡•±Àô‹¢ÂR£š¢‡–z/’ö’â7–gšVÃš6»–êLˆ¤(€€€…À¹…‘‘}…ÉÕµ•¹Ğ (€€€€€€€€ˆ´µ™½É”µÉ•Ù¥•İ•ˆ°(€€€€€€€…Ñ¥½¸ô‰ÍÑ½É•}ÑÉÕ”ˆ°(€€€€€€€¡•±Àô‹–¢ºã¢šnXÉ•Ù¥•İ}ÍÑ…ÑÕÌõ…•ÁÑ•ƒj’êë–Ş—¦Gš‚–¾òo¦îc¢º“’şwš*“ˆ°(€€€€¤(€€€…ÉÌ€ô…À¹Á…ÉÍ•}…ÉÌ ¤(€€€¥˜¹½Ğ…ÉÌ¹½¹™¥Éµ}±±´è(€€€€€€€É…¥Í”MåÍÑ•µá¥Ğ ‹’âë¦bËš¶‹š?–’[šÚ#¢_¦Šw–ê›¾ò3–ş¦†ïšbû–ò?šŞï–*€€´µ½¹™¥É´µ±±´ˆ¤(€€€Á…É…µÌ€ôì‰Í•±•Ğˆè€ (€€€€€€€€€€€€€€€€€€‰É•Á½ÉÑ}¥±½‘”±¹…µ”±Ñ¥Ñ±”±É•Á½ÉÑ}Á•É¥½±Á‘™}ÕÉ°°ˆ(€€€€€€€€€€€€€€€€€€‰…¹‘¥‘…Ñ•}Á…•Ì±±½…Ñ½É}Ñ•ÉµÌˆ(€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€‰ÍÑ…ÑÕÌˆè€‰•Ä¹±½…Ñ•ˆ°€‰½É‘•Èˆè€‰ÁÕ‰±¥Í¡}‘…Ñ”¹‘•ÍŒˆ°€‰±¥µ¥ĞˆèÍÑÈ¡…ÉÌ¹±¥µ¥Ğ¥ô(€€€¥˜…ÉÌ¹É•Á½ÉÑ}¥è(€€€€€€€Á…É…µÌ¹Á½À ‰ÍÑ…ÑÕÌˆ¤(€€€€€€€Á…É…µÍl‰É•Á½ÉÑ}¥‰t€ô˜‰¥¸¸¡ìœ°œ¹©½¥¸¡…ÉÌ¹É•Á½ÉÑ}¥¥ô¤ˆ(€€€•±Í”è(€€€€€€€Á…É…µÍl‰½‘”‰t€ô˜‰¥¸¸¡ìœ°œ¹©½¥¸¡±½…‘}Í…µÁ±•}½‘•Ì¡…ÉÌ¹Í…µÁ±”¤¥ô¤ˆ(€€€É•Á½ÉÑÌ€ôÍ‰}Í•±•Ğ ‰Á•É¥½‘¥}É•Á½ÉÑÌˆ°Á…É…µÌ¤(€€€É•Ù¥•İ}ÍÑ…ÑÕÍ}‰å}É•Á½ÉĞè‘¥ÑmÍÑÈ°ÍÑÉt€ôíô(€€€¥˜É•Á½ÉÑÌè(€€€€€€€É•Ù¥•İ}É½İÌ€ôÍ‰}Í•±•Ğ ‰Á•É¥½‘¥}‘•É¥Ù…Ñ¥Ù•Ìˆ°ì(€€€€€€€€€€€€‰Í•±•Ğˆè€‰É•Á½ÉÑ}¥±É•Ù¥•İ}ÍÑ…ÑÕÌˆ°(€€€€€€€€€€€€‰É•Á½ÉÑ}¥ˆè˜‰¥¸¸¡ìœ°œ¹©½¥¸¡É½İlÉ•Á½ÉÑ}¥t™½ÈÉ½Ü¥¸É•Á½ÉÑÌ¥ô¤ˆ°(€€€€€€€ô¤(€€€€€€€É•Ù¥•İ}ÍÑ…ÑÕÍ}‰å}É•Á½ÉĞ€ôì(€€€€€€€€€€€É½İl‰É•Á½ÉÑ}¥‰tèÉ½Ü¹•Ğ ‰É•Ù¥•İ}ÍÑ…ÑÕÌˆ¤(€€€€€€€€€€€™½ÈÉ½Ü¥¸É•Ù¥•İ}É½İÌ(€€€€€€€ô(€€€Í•±•Ñ•‘}Á…ÍÍ•Ì€ô…ÉÌ¹Á…ÍÍ}¹…µ•Ì½Èl‰ÁÉ½™¥±”ˆ°€©ÁÀ¹5QI%}5%1%Mt(€€€¥Í}™Õ±±}ÉÕ¸€ôÍ•Ğ¡Í•±•Ñ•‘}Á…ÍÍ•Ì¤€ôôì‰ÁÉ½™¥±”ˆ°€©ÁÀ¹5QI%}5%1%Mô(€€€ÉÕ¸€ômt(€€€™½È¤°É•Á½ÉĞ¥¸•¹Õµ•É…Ñ”¡É•Á½ÉÑÌ°€Ä¤è(€€€€€€€¥˜Í¡½Õ±‘}Í­¥Á}É•Ù¥•İ• (€€€€€€€€€€€É•Ù¥•İ}ÍÑ…ÑÕÍ}‰å}É•Á½ÉĞ¹•Ğ¡É•Á½ÉÑl‰É•Á½ÉÑ}¥‰t¤°(€€€€€€€€€€€…ÉÌ¹™½É•}É•Ù¥•İ•°(€€€€€€€€¤è(€€€€€€€€€€€±½œ (€€€€€€€€€€€€€€€˜‰mí¥ô½í±•¸¡É•Á½ÉÑÌ¥õtƒ¢ŞÏ¢ş’êë–Ş—–ŞËš:—–>_¦Gš‚–€ˆ(€€€€€€€€€€€€€€€˜‰íÉ•Á½ÉĞ¹•Ğ ¹…µ”œ¥÷¾òo–š¦r¦7¢ŞG¢¾ßšbû–ò<€´µ™½É”µÉ•Ù¥•İ•ˆ(€€€€€€€€€€€€¤(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€±½œ¡˜‰mí¥ô½í±•¸¡É•Á½ÉÑÌ¥õt117š*÷–>XíÉ•Á½ÉĞ¹•Ğ ¹…µ”œ¥ôíÉ•Á½ÉĞ¹•Ğ É•Á½ÉÑ}Á•É¥½œ¥ôˆ¤(€€€€€€€½¹Ñ•¹Ğ€ô¹¥¹™¼¹‘½İ¹±½…‘}Á‘˜¡É•Á½ÉÑl‰Á‘™}ÕÉ°‰t¤(€€€€€€€¥˜¹½Ğ½¹Ñ•¹Ğè(€€€€€€€€€€€É…¥Í”IÕ¹Ñ¥µ•ÉÉ½È¡˜‰A’â/¢ö÷–’Ç¢Ò”èíÉ•Á½ÉÑlÉ•Á½ÉÑ}¥uôˆ¤(€€€€€€€±½…Ñ•€ô±½…Ñ•}Á‘˜¡½¹Ñ•¹Ğ°É•Á½ÉĞ¹•Ğ ‰±½…Ñ½É}Ñ•ÉµÌˆ¤½Èmt¤(€€€€€€€½¹Ñ•áĞ€ô€ (€€€€€€€€€€€É•Á½ÉÑl‰Ñ¥Ñ±”‰t°É•Á½ÉĞ¹•Ğ ‰¹…µ”ˆ¤°É•Á½ÉÑl‰½‘”‰t°(€€€€€€€€€€€É•Á½ÉÑl‰É•Á½ÉÑ}Á•É¥½‰t°±½…Ñ•¹µ…É­•‘}Ñ•áĞ°(€€€€€€€€¤(€€€€€€€ÁÉ½™¥±•}É•ÍÕ±Ğ€ô€ (€€€€€€€€€€€…±±}Á•É¥½‘¥}±±´¡ÁÀ¹‰Õ¥±‘}ÁÉ½™¥±•}µ•ÍÍ…•Ì ©½¹Ñ•áĞ¤¤(€€€€€€€€€€€¥˜€‰ÁÉ½™¥±”ˆ¥¸Í•±•Ñ•‘}Á…ÍÍ•Ì•±Í”íô(€€€€€€€€¤(€€€€€€€µ•ÑÉ¥}É•ÍÕ±ÑÌ€ôì(€€€€€€€€€€€™…µ¥±äè…±±}Á•É¥½‘¥}±±´¡ÁÀ¹‰Õ¥±‘}µ•ÑÉ¥}µ•ÍÍ…•Ì¡™…µ¥±ä°€©½¹Ñ•áĞ¤¤(€€€€€€€€€€€™½È™…µ¥±ä¥¸ÁÀ¹5QI%}5%1%L¥˜™…µ¥±ä¥¸Í•±•Ñ•‘}Á…ÍÍ•Ì(€€€€€€€ô(€€€€€€€É•ÍÕ±Ğ€ôµ•É•}Á…ÍÍ}É•ÍÕ±ÑÌ¡ÁÉ½™¥±•}É•ÍÕ±Ğ°µ•ÑÉ¥}É•ÍÕ±ÑÌ¤(€€€€€€€Ñ…‰±•}µ•ÑÉ¥Ì°Ñ…‰±•}Á…•Ì€ô•áÑÉ…Ñ}‘•É¥Ù…Ñ¥Ù•}Ñ…‰±•}µ•ÑÉ¥Ì (€€€€€€€€€€€½¹Ñ•¹Ğ°(€€€€€€€€€€€±½…Ñ•¹…¹‘¥‘…Ñ•}Á…•Ì°(€€€€€€€€¤(€€€€€€€É•ÍÕ±Ğ€ôµ•É•}Ñ…‰±•}µ•ÑÉ¥Ì (€€€€€€€€€€€É•ÍÕ±Ğ°(€€€€€€€€€€€Ñ…‰±•}µ•ÑÉ¥Ì°(€€€€€€€€€€€Ñ…‰±•}Á…•Ì°(€€€€€€€€€€€Í•±•Ñ•‘}Á…ÍÍ•Ì°(€€€€€€€€¤(€€€€€€€É•ÍÕ±Ğ€ôµ•É•}Ù•É¥™¥•‘}¹½Ñ•}µ•ÑÉ¥Ì (€€€€€€€€€€€É•ÍÕ±Ğ°(€€€€€€€€€€€•áÑÉ…Ñ}‘•É¥Ù…Ñ¥Ù•}¹½Ñ•}µ•ÑÉ¥Ì¡½¹Ñ•¹Ğ°±½…Ñ•¹…¹‘¥‘…Ñ•}Á…•Ì¤°(€€€€€€€€€€€Í•±•Ñ•‘}Á…ÍÍ•Ì°(€€€€€€€€¤(€€€€€€€¥˜€‰Á¹°ˆ¥¸µ•ÑÉ¥}É•ÍÕ±ÑÌè(€€€€€€€€€€€‘•Ñ•Éµ¥¹¥ÍÑ¥Œ€ô•áÑÉ…Ñ}•áÁ±¥¥Ñ}Á¹±}µ•ÑÉ¥Ì¡±½…Ñ•¹µ…É­•‘}Ñ•áĞ¤(€€€€€€€€€€€•á¥ÍÑ¥¹œ€ôì(€€€€€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€€€€¥Ñ•´¹•Ğ ‰µ•ÑÉ¥}ÑåÁ”ˆ¤°(€€€€€€€€€€€€€€€€€€€¥Ñ•´¹•Ğ ‰Á…”ˆ¤°(€€€€€€€€€€€€€€€€€€€¥Ñ•´¹•Ğ ‰Ù…±Õ”ˆ¤°(€€€€€€€€€€€€€€€€€€€¥Ñ•´¹•Ğ ‰Õ¹¥Ğˆ¤°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€™½È¥Ñ•´¥¸É•ÍÕ±Ğ¹•Ğ ‰µ•ÑÉ¥Ìˆ¤½Èmt(€€€€€€€€€€€€€€€¥˜¥Í¥¹ÍÑ…¹”¡¥Ñ•´°‘¥Ğ¤(€€€€€€€€€€€ô(€€€€€€€€€€€É•ÍÕ±Ğ¹Í•Ñ‘•™…Õ±Ğ ‰µ•ÑÉ¥Ìˆ°mt¤¹•áÑ•¹ (€€€€€€€€€€€€€€€¥Ñ•´™½È¥Ñ•´¥¸‘•Ñ•Éµ¥¹¥ÍÑ¥Œ(€€€€€€€€€€€€€€€¥˜€ (€€€€€€€€€€€€€€€€€€€¥Ñ•µl‰µ•ÑÉ¥}ÑåÁ”‰t°(€€€€€€€€€€€€€€€€€€€¥Ñ•µl‰Á…”‰t°(€€€€€€€€€€€€€€€€€€€¥Ñ•µl‰Ù…±Õ”‰t°(€€€€€€€€€€€€€€€€€€€¥Ñ•µl‰Õ¹¥Ğ‰t°(€€€€€€€€€€€€€€€€¤¹½Ğ¥¸•á¥ÍÑ¥¹œ(€€€€€€€€€€€€¤(€€€€€€€Ñ½À°µ•ÑÉ¥Ì€ô¹½Éµ…±¥é”¡É•ÍÕ±Ğ°±½…Ñ•¹µ…É­•‘}Ñ•áĞ¤(€€€€€€€…½Õ¹Ñ¥¹}¥Ñ•µÌ€ô¹½Éµ…±¥é•}…½Õ¹Ñ¥¹}¥Ñ•µÌ¡É•ÍÕ±Ğ°±½…Ñ•¹µ…É­•‘}Ñ•áĞ¤(€€€€€€€ÁÉ½µ½Ñ•}Ù•É¥™¥•‘}…½Õ¹Ñ¥¹}•Ù¥‘•¹”¡Ñ½À°…½Õ¹Ñ¥¹}¥Ñ•µÌ¤(€€€€€€€Ñ½Ál‰É•Á½ÉÑ}¥‰t€ôÉ•Á½ÉÑl‰É•Á½ÉÑ}¥‰t(€€€€€€€¥˜¹½Ğ…ÉÌ¹‘Éå}ÉÕ¸è(€€€€€€€€€€€¥˜€‰ÁÉ½™¥±”ˆ¥¸Í•±•Ñ•‘}Á…ÍÍ•Ìè(€€€€€€€€€€€€€€€Í‰}ÕÁÍ•ÉĞ ‰Á•É¥½‘¥}‘•É¥Ù…Ñ¥Ù•Ìˆ°mÑ½Át°½¹}½¹™±¥Ğô‰É•Á½ÉÑ}¥ˆ¤(€€€€€€€€€€€€€€€Í‰}‘•±•Ñ” ‰Á•É¥½‘¥}¡•‘•}…½Õ¹Ñ¥¹}¥Ñ•µÌˆ°(€€€€€€€€€€€€€€€€€€€€€€€€€ì‰É•Á½ÉÑ}¥ˆè˜‰•Ä¹íÉ•Á½ÉÑlÉ•Á½ÉÑ}¥uô‰ô¤(€€€€€€€€€€€¥˜Í¡½Õ±‘}ÁÕÉ•}±•…å}µ•ÑÉ¥Ì¡¥Í}™Õ±±}ÉÕ¸¤è(€€€€€€€€€€€€€€€±•…å}ÑåÁ•Ì€ô€ˆ°ˆ¹©½¥¸¡1e}5QI%}QeAL¤(€€€€€€€€€€€€€€€Í‰}‘•±•Ñ” ‰Á•É¥½‘¥}µ•ÑÉ¥}¥Ñ•µÌˆ°ì(€€€€€€€€€€€€€€€€€€€€‰É•Á½ÉÑ}¥ˆè˜‰•Ä¹íÉ•Á½ÉÑlÉ•Á½ÉÑ}¥uôˆ°(€€€€€€€€€€€€€€€€€€€€‰µ•ÑÉ¥}ÑåÁ”ˆè˜‰¥¸¸¡í±•…å}ÑåÁ•Íô¤ˆ°(€€€€€€€€€€€€€€€ô¤(€€€€€€€€€€€™½È™…µ¥±ä¥¸µ•ÑÉ¥}É•ÍÕ±ÑÌè(€€€€€€€€€€€€€€€¥˜¹½ĞÍ¡½Õ±‘}É•Á±…•}µ•ÑÉ¥}™…µ¥±ä¡¥Í}™Õ±±}ÉÕ¸°™…µ¥±ä°µ•ÑÉ¥Ì¤è(€€€€€€€€€€€€€€€€€€€±½œ¡˜‰í™…µ¥±åôƒ~·š&çš²‡¢şS–nxÃšv‡¾ò3’şwVgšVÃš6»–êO’â·jš^‹šr'’ê/–ºxˆ¤(€€€€€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€€€€€€€€€™…µ¥±å}ÑåÁ•Ì€ô€ˆ°ˆ¹©½¥¸¡ÁÀ¹5QI%}5%1%Mm™…µ¥±åt¤(€€€€€€€€€€€€€€€Í‰}‘•±•Ñ” ‰Á•É¥½‘¥}µ•ÑÉ¥}¥Ñ•µÌˆ°ì(€€€€€€€€€€€€€€€€€€€€‰É•Á½ÉÑ}¥ˆè˜‰•Ä¹íÉ•Á½ÉÑlÉ•Á½ÉÑ}¥uôˆ°(€€€€€€€€€€€€€€€€€€€€‰µ•ÑÉ¥}ÑåÁ”ˆè˜‰¥¸¸¡í™…µ¥±å}ÑåÁ•Íô¤ˆ°(€€€€€€€€€€€€€€€ô¤(€€€€€€€€€€€¥˜µ•ÑÉ¥Ìè(€€€€€€€€€€€€€€€Í‰}¥¹Í•ÉĞ ‰Á•É¥½‘¥}µ•ÑÉ¥}¥Ñ•µÌˆ°l(€€€€€€€€€€€€€€€€€€€ì¨©¥Ñ•´°€‰É•Á½ÉÑ}¥ˆèÉ•Á½ÉÑl‰É•Á½ÉÑ}¥‰uô™½È¥Ñ•´¥¸µ•ÑÉ¥Ít¤(€€€€€€€€€€€¥˜€‰ÁÉ½™¥±”ˆ¥¸Í•±•Ñ•‘}Á…ÍÍ•Ì…¹…½Õ¹Ñ¥¹}¥Ñ•µÌè(€€€€€€€€€€€€€€€Í‰}¥¹Í•ÉĞ ‰Á•É¥½‘¥}¡•‘•}…½Õ¹Ñ¥¹}¥Ñ•µÌˆ°l(€€€€€€€€€€€€€€€€€€€ì¨©¥Ñ•´°€‰É•Á½ÉÑ}¥ˆèÉ•Á½ÉÑl‰É•Á½ÉÑ}¥‰uô™½È¥Ñ•´¥¸…½Õ¹Ñ¥¹}¥Ñ•µÍt¤(€€€€€€€€€€€¥˜¥Í}™Õ±±}ÉÕ¸è(€€€€€€€€€€€€€€€Í‰}ÕÁ‘…Ñ” ‰Á•É¥½‘¥}É•Á½ÉÑÌˆ°ì‰É•Á½ÉÑ}¥ˆè˜‰•Ä¹íÉ•Á½ÉÑlÉ•Á½ÉÑ}¥uô‰ô°(€€€€€€€€€€€€€€€€€€€€€€€€€ì‰ÍÑ…ÑÕÌˆè€‰•áÑÉ…Ñ•ˆ°€‰¹½Ñ”ˆè9½¹•ô¤(€€€€€€€ÉÕ¸¹…ÁÁ•¹¡ì(€€€€€€€€€€€€‰É•Á½ÉĞˆèÉ•Á½ÉĞ°(€€€€€€€€€€€€‰•áÑÉ…Ñ¥½¸ˆèÑ½À°(€€€€€€€€€€€€‰µ•ÑÉ¥Ìˆèµ•ÑÉ¥Ì°(€€€€€€€€€€€€‰¡•‘•}…½Õ¹Ñ¥¹}¥Ñ•µÌˆè…½Õ¹Ñ¥¹}¥Ñ•µÌ°(€€€€€€€€€€€€‰É…Üˆèì(€€€€€€€€€€€€€€€€‰ÁÉ½™¥±”ˆèÁÉ½™¥±•}É•ÍÕ±Ğ°(€€€€€€€€€€€€€€€€‰µ•ÑÉ¥}Á…ÍÍ•Ìˆèµ•ÑÉ¥}É•ÍÕ±ÑÌ°(€€€€€€€€€€€ô°(€€€€€€€ô¤(€€€€€€€±½œ (€€€€€€€€€€€˜‹š*¯¦rË*ÛšõíÑ½Ál‘¥Í±½ÍÕÉ•}ÍÑ…ÑÕÌu÷¾òošVÃ–ó’ê/–ºxõí±•¸¡µ•ÑÉ¥Ì¥ôƒšv‡¾òlˆ(€€€€€€€€€€€˜‹––_šr’òk¢º‡šb;îõí±•¸¡…½Õ¹Ñ¥¹}¥Ñ•µÌ¥ôƒšv„ˆ(€€€€€€€€¤(€€€Í¹…ÁÍ¡½Ñ}©Í½¸ ‰Á•É¥½‘¥}•áÑÉ…Ñ}ÉÕ¸ˆ°ÉÕ¸¤(()¥˜}}¹…µ•}|€ôô€‰}}µ…¥¹}|ˆè(€€€µ…¥¸ ¤(
+    """åˆå¹¶çŸ­è¾“å‡ºæ‰¹æ¬¡ï¼Œå¹¶æ‹’ç»æ¨¡å‹è¶Šè¿‡å½“å‰æ‰¹æ¬¡çš„ metric_typeã€‚"""
+    merged = dict(profile)
+    metrics: list[dict] = []
+    for family, result in metric_results.items():
+        allowed = set(pp.METRIC_FAMILIES.get(family, ()))
+        for item in result.get("metrics") or []:
+            if isinstance(item, dict) and item.get("metric_type") in allowed:
+                metrics.append(item)
+    merged["metrics"] = metrics
+    return merged
+
+
+def normalize_accounting_items(result: dict, body: str) -> list[dict]:
+    no_derivative_phrase = next(
+        (
+            phrase for phrase in (
+                "æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+                "æŠ¥å‘ŠæœŸå†…ä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+                "æœ¬æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+            )
+            if phrase in (body or "")
+        ),
+        None,
+    )
+    if no_derivative_phrase:
+        page, quote = find_page_evidence(body, no_derivative_phrase)
+        return [{
+            "scope": None,
+            "instrument": None,
+            "underlying_asset": None,
+            "application_status": "æœªåº”ç”¨",
+            "accounting_type": None,
+            "non_application_reason": "æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+            "source_section": "è¡ç”Ÿå“æŠ•èµ„æƒ…å†µ",
+            "page": page,
+            "quote": quote,
+            "quote_verified": True,
+            "confidence": 1.0,
+            "need_review": False,
+        }]
+    items: list[dict] = []
+    for raw_item in result.get("hedge_accounting_items") or []:
+        if not isinstance(raw_item, dict):
+            continue
+        status = raw_item.get("application_status")
+        status = status if status in ACCOUNTING_ITEM_STATUS else "éœ€å¤æ ¸"
+        accounting_type = raw_item.get("accounting_type")
+        accounting_type = accounting_type if accounting_type in HEDGE_ACCOUNTING_TYPES else None
+        if status != "å·²åº”ç”¨":
+            accounting_type = None
+        page = raw_item.get("page")
+        page = page if isinstance(page, int) and page > 0 else None
+        quote = str(raw_item.get("quote") or "")[:240] or None
+        if (
+            quote
+            and any(marker in quote for marker in POLICY_ONLY_ACCOUNTING_MARKERS)
+        ):
+            continue
+        quote_verified = verify_quote(quote, body) if quote else None
+        if status == "å·²åº”ç”¨" and not any(
+            term in (quote or "")
+            for term in (
+                "å¥—æœŸä¼šè®¡",
+                "ç°é‡‘æµé‡å¥—æœŸ",
+                "å…¬å…ä»·å€¼å¥—æœŸ",
+                "å¥—æœŸå‚¨å¤‡",
+                "æŒ‡å®šä¸ºå¥—æœŸå·¥å…·",
+            )
+        ):
+            continue
+        if status == "æœªåº”ç”¨" and not any(
+            term in (quote or "")
+            for term in (
+                "æœªåº”ç”¨å¥—æœŸä¼šè®¡",
+                "ä¸é€‚ç”¨",
+                "æœªè¢«æŒ‡å®šä¸ºå¥—æœŸå·¥å…·",
+                "ä¸ç¬¦åˆå¥—æœŸä¼šè®¡",
+                "ä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+            )
+        ):
+            continue
+        confidence = raw_item.get("confidence")
+        confidence = (
+            float(confidence)
+            if isinstance(confidence, (int, float)) and 0 <= confidence <= 1 else None
+        )
+        need_review = (
+          â€¦1144 tokens truncatedâ€¦ tail = compact[heading.end():heading.end() + 50]
+        checked = re.match(
+            r"(?:[â–¡â˜]é€‚ç”¨[âˆšâœ“â˜‘â– ]ä¸é€‚ç”¨|"
+            r"é€‚ç”¨[â–¡â˜][âˆšâœ“â˜‘â– ]?ä¸é€‚ç”¨|"
+            r"[â–¡â˜]?é€‚ç”¨ä¸é€‚ç”¨[âˆšâœ“â˜‘â– ])",
+            tail,
+        )
+        plain = re.match(r"[:ï¼š]?ä¸é€‚ç”¨(?:[ã€‚ï¼›;]|$)", tail)
+        if checked or plain:
+            end = heading.end() + (checked or plain).end()
+            return int(match.group("page")), compact[heading.start():end][:240]
+    return None, None
+
+
+def promote_verified_accounting_evidence(
+    top: dict,
+    accounting_items: list[dict],
+) -> None:
+    status_map = {
+        "å·²åº”ç”¨": "å·²åº”ç”¨",
+        "æœªåº”ç”¨": "æœªåº”ç”¨",
+    }
+    target_status = status_map.get(top.get("hedge_accounting_status"))
+    if not target_status:
+        return
+    verified = next(
+        (
+            item for item in accounting_items
+            if item.get("application_status") == target_status
+            and item.get("quote_verified") is True
+            and item.get("quote")
+        ),
+        None,
+    )
+    if not verified:
+        return
+    top["hedge_accounting_page"] = verified.get("page")
+    top["hedge_accounting_quote"] = verified.get("quote")
+    top["hedge_accounting_quote_verified"] = True
+    if verified.get("non_application_reason"):
+        top["non_application_reason"] = verified["non_application_reason"]
+
+
+def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
+    status = result.get("disclosure_status")
+    status = status if status in DISCLOSURE else "éœ€å¤æ ¸"
+    legacy_accounting = _list(result.get("hedge_accounting"))
+    accounting_types = [
+        x for x in _list(result.get("hedge_accounting_types") or legacy_accounting)
+        if x in HEDGE_ACCOUNTING_TYPES
+    ]
+    accounting_status = result.get("hedge_accounting_status")
+    if accounting_status not in HEDGE_ACCOUNTING_STATUS:
+        accounting_status = "å·²åº”ç”¨" if accounting_types else "æœªæ˜ç¡®æŠ«éœ²"
+    if accounting_status in {"æœªåº”ç”¨", "æœªæ˜ç¡®æŠ«éœ²"}:
+        legacy_accounting = []
+        accounting_types = []
+    accounting_evidence = result.get("hedge_accounting_evidence")
+    accounting_evidence = accounting_evidence if isinstance(accounting_evidence, dict) else {}
+    accounting_page = accounting_evidence.get("page")
+    accounting_page = accounting_page if isinstance(accounting_page, int) and accounting_page > 0 else None
+    accounting_quote = str(accounting_evidence.get("quote") or "")[:240] or None
+    if (
+        accounting_quote
+        and any(marker in accounting_quote for marker in POLICY_ONLY_ACCOUNTING_MARKERS)
+    ):
+        cash_flow_page, cash_flow_quote = find_page_evidence(
+            body,
+            "ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡",
+            require_numeric=True,
+        )
+        if cash_flow_page:
+            legacy_accounting = ["ç°é‡‘æµé‡å¥—æœŸ"]
+            accounting_types = ["ç°é‡‘æµé‡å¥—æœŸ"]
+            accounting_status = "å·²åº”ç”¨"
+            accounting_page = cash_flow_page
+            accounting_quote = cash_flow_quote
+        else:
+            legacy_accounting = []
+            accounting_types = []
+            accounting_status = "æœªæ˜ç¡®æŠ«éœ²"
+            accounting_page = None
+            accounting_quote = None
+    if accounting_status == "å·²åº”ç”¨" and accounting_types == ["ç°é‡‘æµé‡å¥—æœŸ"]:
+        cash_flow_page, cash_flow_quote = find_page_evidence(
+            body,
+            "ç°é‡‘æµé‡å¥—æœŸå‚¨å¤‡",
+            require_numeric=True,
+        )
+        if cash_flow_page:
+            accounting_page = cash_flow_page
+            accounting_quote = cash_flow_quote
+    no_derivative_phrase = next(
+        (
+            phrase for phrase in (
+                "æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+                "æŠ¥å‘ŠæœŸå†…ä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+                "æœ¬æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+            )
+            if phrase in (body or "")
+        ),
+        None,
+    )
+    if (
+        status == "æœªæåŠ"
+        and no_derivative_phrase
+    ):
+        status = "æåŠæ— æ•°å€¼"
+    if no_derivative_phrase:
+        no_derivative_page, no_derivative_quote = find_page_evidence(
+            body,
+            no_derivative_phrase,
+        )
+        accounting_status = "æœªåº”ç”¨"
+        accounting_types = []
+        legacy_accounting = []
+        accounting_page = no_derivative_page
+        accounting_quote = no_derivative_quote
+        if not result.get("non_application_reason"):
+            result = {
+                **result,
+                "non_application_reason": "æŠ¥å‘ŠæœŸä¸å­˜åœ¨è¡ç”Ÿå“æŠ•èµ„",
+            }
+    checkbox_page, checkbox_quote = find_non_application_checkbox(body)
+    if checkbox_page:
+        accounting_status = "æœªåº”ç”¨"
+        accounting_types = []
+        legacy_accounting = []
+        accounting_page = checkbox_page
+        accounting_quote = checkbox_quote
+        result = {**result, "non_application_reason": None}
+    normalized_scopes = [x for x in _list(result.get("scopes")) if x in SCOPES]
+    non_application_reason = result.get("non_application_reason") or None
+    top = {
+        "disclosure_status": status,
+        "scopes": normalized_scopes,
+        "instruments": _list(result.get("instruments")),
+        "underlyings": _list(result.get("underlyings")),
+        "purpose": (result.get("purpose") or None),
+        "hedge_accounting": legacy_accounting or accounting_types,
+        "hedge_accounting_status": accounting_status,
+        "hedge_accounting_types": accounting_types,
+        "non_application_reason": non_application_reason,
+        "hedge_accounting_page": accounting_page,
+        "hedge_accounting_quote": accounting_quote,
+        "hedge_accounting_quote_verified": (
+            verify_quote(accounting_quote, body) if accounting_quote else None
+        ),
+        "summary": normalize_summary(
+            result.get("summary"),
+            normalized_scopes,
+            status,
+            accounting_status,
+            non_application_reason,
+        ),
+        "evidence": result.get("evidence") if isinstance(result.get("evidence"), list) else [],
+        "confidence": float(result["confidence"]) if isinstance(result.get("confidence"), (int, float)) else None,
+        "model": env("LLM_MODEL", "MiniMax-M3"), "prompt_version": pp.PROMPT_VERSION,
+        "extracted_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    has_verified_business_table = any(
+        isinstance(item, dict)
+        and item.get("table_cell_verified") is True
+        and item.get("source_section") == "è¡ç”Ÿå“æŠ•èµ„æƒ…å†µ"
+        for item in (result.get("metrics") or [])
+    )
+    has_verified_explicit_derivative_note = any(
+        isinstance(item, dict)
+        and item.get("table_cell_verified") is True
+        and item.get("source_section") in {
+            "æŠ•èµ„æ”¶ç›Š",
+            "å…¬å…ä»·å€¼å˜åŠ¨æ”¶ç›Š",
+            "å…¬å…ä»·å€¼æŠ«éœ²",
+        }
+        and any(
+            marker in str(item.get("raw") or "")
+            for marker in ("è¡ç”Ÿé‡‘èå·¥å…·", "è¡ç”Ÿé‡‘èèµ„äº§", "è¡ç”Ÿé‡‘èè´Ÿå€º")
+        )
+        for item in (result.get("metrics") or [])
+    )
+    metrics: list[dict] = []
+    for raw_item in result.get("metrics") or []:
+        if not isinstance(raw_item, dict):
+            continue
+        value = raw_item.get("value")
+        page = raw_item.get("page")
+        quote = str(raw_item.get("raw") or "")[:240]
+        if not isinstance(value, (int, float)) or not isinstance(page, int) or page <= 0 or not quote:
+            continue
+        source_section = str(raw_item.get("source_section") or "")
+        account_name = str(raw_item.get("account_name") or "")
+        metric_type = normalize_metric_type(
+            str(raw_item.get("metric_type") or ""),
+            quote,
+            source_section,
+            account_name,
+        )
+        if metric_type not in METRICS:
+            continue
+        derivative_context = " ".join((quote, source_section, account_name))
+        if (
+            metric_type == "derivative_disposal_investment_income"
+            and not any(
+                marker in derivative_context
+                for marker in (
+                    "è¡ç”Ÿ", "æœŸè´§", "æœŸæƒ", "è¿œæœŸ", "æ‰æœŸ", "äº’æ¢", "å¥—æœŸ", "T+D",
+                )
+            )
+        ):
+            continue
+        if metric_type == "margin_end_cash":
+            if "é»„é‡‘ç§Ÿèµ" in derivative_context or "ç§Ÿå€Ÿé»„é‡‘" in derivative_context:
+                continue
+            if not any(
+                marker in derivative_context
+                for marker in (
+                    "è¡ç”Ÿ", "æœŸè´§", "æœŸæƒ", "è¿œæœŸ", "ç»“å”®æ±‡", "æ‰æœŸ", "äº’æ¢", "T+D",
+                )
+            ):
+                continue
+        value, unit = restore_literal_scale(value, raw_item.get("unit"), quote)
+        value_verified = verify_raw_value(value, quote)
+        if float(value) == 0 and not zero_literal_matches_unit(unit, quote):
+            value_verified = False
+        if float(value) == 0 and not value_verified:
+            continue
+        if not value_verified:
+            continue
+        scope = raw_item.get("scope") if raw_item.get("scope") in SCOPES else None
+        inferred_scope = False
+        if metric_type in {
+            "reported_derivative_comprehensive_pnl",
+            "derivative_disposal_investment_income",
+        } and scope is None:
+            has_commodity = any(
+                term in derivative_context for term in ("å•†å“", "æœŸè´§", "T+D")
+            )
+            has_fx = any(
+                term in derivative_context for term in ("å¤–æ±‡", "æ±‡ç‡", "è¿œæœŸ")
+            )
+            if has_commodity != has_fx:
+                scope = "å•†å“" if has_commodity else "å¤–æ±‡"
+                inferred_scope = True
+        underlying = raw_item.get("underlying") or None
+        fact_level = raw_item.get("fact_level")
+        if inferred_scope and fact_level == "report":
+            fact_level = "scope"
+        if fact_level not in FACT_LEVELS:
+            fact_level = "underlying" if scope and underlying else ("scope" if scope else "report")
+        if fact_level == "report":
+            scope = None
+            underlying = None
+        elif fact_level == "underlying" and not underlying:
+            fact_level = "scope" if scope else "report"
+        if fact_level == "scope":
+            underlying = None
+        if fact_level in {"scope", "underlying"} and not scope:
+            fact_level = "report"
+            underlying = None
+        quote_verified = (
+            True if raw_item.get("table_cell_verified") is True
+            else verify_quote(quote, body)
+        )
+        if quote_verified is not True:
+            continue
+        metrics.append({
+            "metric_type": metric_type,
+            "fact_level": fact_level,
+            "scope": scope,
+            "underlying": underlying,
+            "value": float(value), "currency": raw_item.get("currency") or None,
+            "unit": unit,
+            "time_basis": raw_item.get("time_basis") if raw_item.get("time_basis") in TIME_BASIS else "period",
+            "source_section": raw_item.get("source_section") or None,
+            "account_name": raw_item.get("account_name") or None,
+            "is_restricted": (
+                raw_item.get("is_restricted")
+                if isinstance(raw_item.get("is_restricted"), bool) else None
+            ),
+            "counterparty": raw_item.get("counterparty") or None,
+            "raw_text": quote, "page": page,
+            "value_verified": value_verified,
+            "quote_verified": quote_verified,
+            "value_origin": "reported",
+        })
+    deduplicated: list[dict] = []
+    seen_metrics: set[tuple] = set()
+    for item in metrics:
+        key = (
+            item["metric_type"], item["fact_level"], item["scope"],
+            item["underlying"], item["value"], item["currency"], item["unit"],
+            item["time_basis"], normalize_account_key(item["account_name"]), item["page"],
+        )
+        if key in seen_metrics:
+            continue
+        seen_metrics.add(key)
+        deduplicated.append(item)
+    metrics = deduplicated
+    if metrics and top["disclosure_status"] in {"æåŠæ— æ•°å€¼", "æœªæåŠ"}:
+        has_profile_hedge_context = bool(top["scopes"] or top["purpose"])
+        top["disclosure_status"] = "æœ‰æ•°å€¼" if (
+            has_verified_business_table
+            or (has_verified_explicit_derivative_note and has_profile_hedge_context)
+        ) else "éœ€å¤æ ¸"
+    return top, metrics
+
+
+def build_report_query(
+    sample: str,
+    limit: int,
+    report_ids: list[str] | None = None,
+) -> dict[str, str]:
+    params = {
+        "select": (
+            "report_id,code,name,title,report_period,pdf_url,"
+            "candidate_pages,locator_terms"
+        ),
+        "status": "eq.located",
+        "order": "publish_date.desc",
+        "limit": str(limit),
+    }
+    if report_ids:
+        params.pop("status")
+        params.pop("limit")
+        params["report_id"] = f"in.({','.join(report_ids)})"
+    else:
+        params["code"] = f"in.({','.join(load_sample_codes(sample))})"
+    return params
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="å°æ‰¹é‡æŠ½å–å®šæœŸæŠ¥å‘Š")
+    ap.add_argument("--sample", default=str(ROOT / "config" / "annual_validation_2025.csv"))
+    ap.add_argument("--limit", type=int, default=1)
+    ap.add_argument("--report-id", action="append")
+    ap.add_argument(
+        "--pass",
+        dest="pass_names",
+        action="append",
+        choices=["profile", *pp.METRIC_FAMILIES],
+        help="åªæ‰§è¡ŒæŒ‡å®šçŸ­æ‰¹æ¬¡ï¼›å¯é‡å¤ä¼ å…¥ã€‚é»˜è®¤æ‰§è¡Œå…¨éƒ¨ã€‚",
+    )
+    ap.add_argument("--confirm-llm", action="store_true", help="ç¡®è®¤æœ¬æ¬¡ä¼šäº§ç”Ÿæ¨¡å‹è°ƒç”¨")
+    ap.add_argument("--dry-run", action="store_true", help="è°ƒç”¨æ¨¡å‹ä½†ä¸å†™æ•°æ®åº“")
+    ap.add_argument(
+        "--force-reviewed",
+        action="store_true",
+        help="å…è®¸è¦†ç›– review_status=accepted çš„äººå·¥é‡‘æ ‡å‡†ï¼›é»˜è®¤ä¿æŠ¤ã€‚",
+    )
+    args = ap.parse_args()
+    if not args.confirm_llm:
+        raise SystemExit("ä¸ºé˜²æ­¢æ„å¤–æ¶ˆè€—é¢åº¦ï¼Œå¿…é¡»æ˜¾å¼æ·»åŠ  --confirm-llm")
+    params = build_report_query(args.sample, args.limit, args.report_id)
+    reports = sb_select("periodic_reports", params)
+    review_status_by_report: dict[str, str] = {}
+    if reports:
+        review_rows = sb_select("periodic_derivatives", {
+            "select": "report_id,review_status",
+            "report_id": f"in.({','.join(row['report_id'] for row in reports)})",
+        })
+        review_status_by_report = {
+            row["report_id"]: row.get("review_status")
+            for row in review_rows
+        }
+    selected_passes = args.pass_names or ["profile", *pp.METRIC_FAMILIES]
+    is_full_run = set(selected_passes) == {"profile", *pp.METRIC_FAMILIES}
+    run = []
+    for i, report in enumerate(reports, 1):
+        if should_skip_reviewed(
+            review_status_by_report.get(report["report_id"]),
+            args.force_reviewed,
+        ):
+            log(
+                f"[{i}/{len(reports)}] è·³è¿‡äººå·¥å·²æ¥å—é‡‘æ ‡å‡† "
+                f"{report.get('name')}ï¼›å¦‚éœ€é‡è·‘è¯·æ˜¾å¼ --force-reviewed"
+            )
+            continue
+        log(f"[{i}/{len(reports)}] LLMæŠ½å– {report.get('name')} {report.get('report_period')}")
+        content = cninfo.download_pdf(report["pdf_url"])
+        if not content:
+            raise RuntimeError(f"PDFä¸‹è½½å¤±è´¥: {report['report_id']}")
+        located = locate_pdf(content, report.get("locator_terms") or [])
+        context = (
+            report["title"], report.get("name"), report["code"],
+            report["report_period"], located.marked_text,
+        )
+        profile_result = (
+            call_periodic_llm(pp.build_profile_messages(*context))
+            if "profile" in selected_passes else {}
+        )
+        metric_results = {
+            family: call_periodic_llm(pp.build_metric_messages(family, *context))
+            for family in pp.METRIC_FAMILIES if family in selected_passes
+        }
+        result = merge_pass_results(profile_result, metric_results)
+        table_metrics, table_pages = extract_derivative_table_metrics(
+            content,
+            located.candidate_pages,
+        )
+        result = merge_table_metrics(
+            result,
+            table_metrics,
+            table_pages,
+            selected_passes,
+        )
+        result = merge_verified_note_metrics(
+            result,
+            extract_derivative_note_metrics(content, located.candidate_pages),
+            selected_passes,
+        )
+        if "pnl" in metric_results:
+            deterministic = extract_explicit_pnl_metrics(located.marked_text)
+            existing = {
+                (
+                    item.get("metric_type"),
+                    item.get("page"),
+                    item.get("value"),
+                    item.get("unit"),
+                )
+                for item in result.get("metrics") or []
+                if isinstance(item, dict)
+            }
+            result.setdefault("metrics", []).extend(
+                item for item in deterministic
+                if (
+                    item["metric_type"],
+                    item["page"],
+                    item["value"],
+                    item["unit"],
+                ) not in existing
+            )
+        top, metrics = normalize(result, located.marked_text)
+        accounting_items = normalize_accounting_items(result, located.marked_text)
+        promote_verified_accounting_evidence(top, accounting_items)
+        top["report_id"] = report["report_id"]
+        if not args.dry_run:
+            if "profile" in selected_passes:
+                sb_upsert("periodic_derivatives", [top], on_conflict="report_id")
+                sb_delete("periodic_hedge_accounting_items",
+                          {"report_id": f"eq.{report['report_id']}"})
+            if should_purge_legacy_metrics(is_full_run):
+                legacy_types = ",".join(LEGACY_METRIC_TYPES)
+                sb_delete("periodic_metric_items", {
+                    "report_id": f"eq.{report['report_id']}",
+                    "metric_type": f"in.({legacy_types})",
+                })
+            for family in metric_results:
+                if not should_replace_metric_family(is_full_run, family, metrics):
+                    log(f"{family} çŸ­æ‰¹æ¬¡è¿”å›0æ¡ï¼Œä¿ç•™æ•°æ®åº“ä¸­çš„æ—¢æœ‰äº‹å®")
+                    continue
+                family_types = ",".join(pp.METRIC_FAMILIES[family])
+                sb_delete("periodic_metric_items", {
+                    "report_id": f"eq.{report['report_id']}",
+                    "metric_type": f"in.({family_types})",
+                })
+            if metrics:
+                sb_insert("periodic_metric_items", [
+                    {**item, "report_id": report["report_id"]} for item in metrics])
+            if "profile" in selected_passes and accounting_items:
+                sb_insert("periodic_hedge_accounting_items", [
+                    {**item, "report_id": report["report_id"]} for item in accounting_items])
+            if is_full_run:
+                sb_update("periodic_reports", {"report_id": f"eq.{report['report_id']}"},
+                          {"status": "extracted", "note": None})
+        run.append({
+            "report": report,
+            "extraction": top,
+            "metrics": metrics,
+            "hedge_accounting_items": accounting_items,
+            "raw": {
+                "profile": profile_result,
+                "metric_passes": metric_results,
+            },
+        })
+        log(
+            f"æŠ«éœ²çŠ¶æ€={top['disclosure_status']}ï¼›æ•°å€¼äº‹å®={len(metrics)} æ¡ï¼›"
+            f"å¥—æœŸä¼šè®¡æ˜ç»†={len(accounting_items)} æ¡"
+        )
+    snapshot_json("periodic_extract_run", run)
+
+
+if __name__ == "__main__":
+    main()
+

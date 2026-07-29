@@ -165,10 +165,10 @@ def parse_derivative_investment_table(
             label = compact[0]
             if label == "合计" or "报告期" in label:
                 continue
-            if any(term in label for term in ("远期", "外汇", "汇率", "货币", "掉期")):
-                scope = "外汇"
-            elif "利率" in label:
+            if "利率" in label:
                 scope = "利率"
+            elif any(term in label for term in ("远期", "外汇", "汇率", "货币", "掉期")):
+                scope = "外汇"
             elif any(term in label for term in ("期货", "期权", "商品")):
                 scope = "商品"
             else:
@@ -215,10 +215,10 @@ def parse_derivative_investment_table(
         label = re.sub(r"\s+", "", str(row[0] or ""))
         if not label or label == "合计" or "报告期" in label:
             continue
-        if any(term in label for term in ("远期", "外汇", "汇率", "货币", "掉期")):
-            scope = "外汇"
-        elif "利率" in label:
+        if "利率" in label:
             scope = "利率"
+        elif any(term in label for term in ("远期", "外汇", "汇率", "货币", "掉期")):
+            scope = "外汇"
         elif any(term in label for term in ("期货", "期权", "商品")):
             scope = "商品"
         else:
@@ -257,6 +257,40 @@ def parse_derivative_investment_table(
                 "table_cell_verified": True,
             })
     return metrics
+
+
+def _is_derivative_investment_header(
+    rows: list[list[str | None]],
+) -> bool:
+    header_text = "".join(
+        re.sub(r"\s+", "", str(cell or ""))
+        for row in rows[:10]
+        for cell in row
+    )
+    return all(fragment in header_text for fragment in (
+        "衍生品投资类",
+        "本期公允价值变动损益",
+        "期末投资金额",
+    ))
+
+
+def merge_derivative_continuation(
+    rows: list[list[str | None]],
+    *,
+    prior_header_rows: list[list[str | None]] | None,
+    prior_page: int | None,
+    page: int,
+    table_top: float,
+) -> list[list[str | None]]:
+    """把上一页的标准衍生品表头接到紧邻下一页的续表数据前。"""
+    if (
+        prior_header_rows
+        and prior_page == page - 1
+        and table_top < 350
+        and not _is_derivative_investment_header(rows)
+    ):
+        return [*prior_header_rows, *rows]
+    return rows
 
 
 def _table_number(value: str | None) -> tuple[float, str] | None:
@@ -463,22 +497,43 @@ def extract_derivative_table_metrics(
     metrics: list[dict] = []
     table_pages: set[int] = set()
     try:
+        carry_header_rows: list[list[str | None]] | None = None
+        carry_page: int | None = None
+        carry_unit: str | None = None
         for page_number in candidate_pages:
             page = doc[page_number - 1]
             for table in page.find_tables().tables:
+                raw_rows = table.extract()
                 unit = unit_before_table(
                     page.get_text("blocks"),
                     table_top=table.bbox[1],
                     page_text=page.get_text(),
                 )
+                rows = merge_derivative_continuation(
+                    raw_rows,
+                    prior_header_rows=carry_header_rows,
+                    prior_page=carry_page,
+                    page=page_number,
+                    table_top=table.bbox[1],
+                )
+                if rows is not raw_rows and carry_unit:
+                    unit = carry_unit
                 parsed = parse_derivative_investment_table(
-                    table.extract(),
+                    rows,
                     page=page_number,
                     unit=unit,
                 )
                 if parsed:
                     metrics.extend(parsed)
                     table_pages.add(page_number)
+                    if rows is not raw_rows:
+                        carry_header_rows = None
+                        carry_page = None
+                        carry_unit = None
+                elif _is_derivative_investment_header(raw_rows):
+                    carry_header_rows = raw_rows
+                    carry_page = page_number
+                    carry_unit = unit
     finally:
         doc.close()
     return metrics, table_pages
@@ -684,3 +739,4 @@ def locate_pdf(content: bytes, custom_terms: list[str] | None = None) -> Located
         locator_terms=sorted(matched),
         page_scores={p: scores[p] for p in candidate_pages if p in scores},
     )
+
