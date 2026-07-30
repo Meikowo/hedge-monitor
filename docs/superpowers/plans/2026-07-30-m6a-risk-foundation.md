@@ -28,10 +28,10 @@
 **Interfaces:**
 - Produces four public tables: `risk_source_documents`, `derivative_risk_cases`, `risk_case_documents`, `risk_case_evidence`.
 
-- [ ] Write schema-structure tests that require the four tables, closed risk-type constraint, RLS, anon SELECT grants, and service-role writes.
-- [ ] Run `python -m unittest tests.test_risk_pipeline -v` and verify the tests fail because migration 005 does not exist.
-- [ ] Add migration 005 and reset/verification coverage.
-- [ ] Re-run the focused tests and verify they pass.
+- [x] Write schema-structure tests that require the four tables, closed risk-type constraint, RLS, anon SELECT grants, and service-role writes.
+- [x] Run `python -m unittest tests.test_risk_pipeline -v` and verify the tests fail because migration 005 does not exist.
+- [x] Add migration 005 and reset/verification coverage.
+- [x] Re-run the focused tests and verify they pass.
 
 ### Task 2: SSE source adapter
 
@@ -45,10 +45,10 @@
 - Produces `normalize_document(raw, kind) -> dict`.
 - Produces `unwrap_jsonp(text) -> dict`.
 
-- [ ] Add failing tests with literal SSE JSONP fixtures for inquiry/measure normalization, official URL enforcement, pagination, and malformed JSONP.
-- [ ] Run the focused tests and confirm expected failures for missing module/functions.
-- [ ] Implement the minimal adapter with retries, referer headers, date filters, page limit and polite sleep.
-- [ ] Re-run focused tests and keep them green.
+- [x] Add failing tests with literal SSE JSONP fixtures for inquiry/measure normalization, official URL enforcement, pagination, and malformed JSONP.
+- [x] Run the focused tests and confirm expected failures for missing module/functions.
+- [x] Implement the minimal adapter with retries, referer headers, date filters, page limit and polite sleep.
+- [x] Re-run focused tests and keep them green.
 
 ### Task 3: Derivatives-risk relevance gate
 
@@ -59,10 +59,10 @@
 **Interfaces:**
 - Produces `assess_relevance(title, text, source_type) -> dict` with `candidate`, `relevant`, `matched_derivative_terms`, `matched_risk_terms`, `reason`.
 
-- [ ] Add failing table-driven tests for direct derivatives loss/violation, generic policy language, law-title-only mentions, and unrelated inquiry letters.
-- [ ] Run the focused tests and confirm failures for the missing gate.
-- [ ] Implement normalized matching and bounded co-occurrence windows.
-- [ ] Re-run focused tests and keep them green.
+- [x] Add failing table-driven tests for direct derivatives loss/violation, generic policy language, law-title-only mentions, and unrelated inquiry letters.
+- [x] Run the focused tests and confirm failures for the missing gate.
+- [x] Implement normalized matching and bounded co-occurrence windows.
+- [x] Re-run focused tests and keep them green.
 
 ### Task 4: Discovery orchestration and persistence
 
@@ -74,10 +74,10 @@
 - Consumes normalized SSE documents and `assess_relevance`.
 - Produces candidate rows for `risk_source_documents`, CSV snapshots, and optional `sb_upsert(..., on_conflict="source_doc_id")`.
 
-- [ ] Add failing tests for dry-run no-write behavior, deterministic IDs/statuses, duplicate collapse, and write-mode upsert arguments.
-- [ ] Run focused tests and confirm expected failures.
-- [ ] Implement CLI options `--source`, `--kind`, `--start-date`, `--end-date`, `--max-pages`, `--limit`, and `--write`.
-- [ ] Re-run focused tests and the complete Python test suite.
+- [x] Add failing tests for dry-run no-write behavior, deterministic IDs/statuses, duplicate collapse, and write-mode upsert arguments.
+- [x] Run focused tests and confirm expected failures.
+- [x] Implement CLI options `--source`, `--kind`, `--start-date`, `--end-date`, `--max-pages`, `--limit`, and `--write`.
+- [x] Re-run focused tests and the complete Python test suite.
 
 ### Task 5: Manual POC workflow and documentation
 
@@ -91,10 +91,10 @@
 **Interfaces:**
 - Workflow dispatches SSE inquiry/measure discovery for a bounded date range and defaults to dry-run.
 
-- [ ] Add a failing workflow-structure test for manual dispatch, bounded limits, explicit write confirmation, independent concurrency, secrets, and artifact retention.
-- [ ] Add the workflow with `confirm_write` guard; do not add a schedule yet.
-- [ ] Update project/schema/worklog documents with the M6a-1 boundary and next gate.
-- [ ] Run Python tests, YAML parse, and Python syntax checks.
+- [x] Add a failing workflow-structure test for manual dispatch, bounded limits, explicit write confirmation, independent concurrency, secrets, and artifact retention.
+- [x] Add the workflow with `confirm_write` guard; do not add a schedule yet.
+- [x] Update project/schema/worklog documents with the M6a-1 boundary and next gate.
+- [x] Run Python tests, YAML parse, and Python syntax checks.
 
 ### Task 6: Supabase and live-source verification
 
@@ -104,8 +104,7 @@
 **Interfaces:**
 - Applies `db/005_derivative_risk_cases.sql` to project `uwxzftnpsrqlvetwjjjj`.
 
-- [ ] Run Supabase advisors before applying the migration.
-- [ ] Apply migration 005 and query information_schema/RLS/policies/grants to verify it.
-- [ ] Run a bounded SSE dry-run probe for both inquiry and measure sources.
-- [ ] Review the generated candidate distribution before any write-mode ingestion.
-
+- [x] Run Supabase advisors before applying the migration.
+- [x] Apply migration 005 and query information_schema/RLS/policies/grants to verify it.
+- [x] Run a bounded SSE dry-run probe for both inquiry and measure sources.
+- [x] Review the generated candidate distribution before any write-mode ingestion.

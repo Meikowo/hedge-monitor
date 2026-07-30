@@ -31,6 +31,7 @@ def prepare_document(
         document.get("source_type") or "other_official",
     )
     raw_metadata = dict(document.get("raw_metadata") or {})
+    raw_metadata["rule_relevant"] = assessment.relevant
     if fetched and text:
         terms = assessment.matched_derivative_terms + assessment.matched_risk_terms
         positions = [text.find(term) for term in terms if text.find(term) >= 0]
@@ -83,6 +84,20 @@ def sanitize_company_codes(
             clean["code"] = None
         out.append(clean)
     return out
+
+
+def persist_documents(
+    rows: Iterable[dict[str, Any]],
+    known_codes: set[str],
+    upsert_fn: Any,
+) -> int:
+    """Persist normalized rows through the project's idempotent upsert contract."""
+    safe_rows = sanitize_company_codes(rows, known_codes)
+    return upsert_fn(
+        "risk_source_documents",
+        safe_rows,
+        on_conflict="source_doc_id",
+    )
 
 
 def _html_to_text(content: bytes, encoding: str | None = None) -> str:
@@ -171,6 +186,11 @@ def parse_args() -> argparse.Namespace:
         description="发现上交所衍生品风险监管文档；默认仅生成快照，不写库。"
     )
     parser.add_argument(
+        "--source",
+        choices=("sse",),
+        default="sse",
+    )
+    parser.add_argument(
         "--kind",
         choices=("inquiry", "regulatory_measure", "all"),
         default="all",
@@ -190,6 +210,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.source != "sse":
+        raise ValueError(f"Unsupported risk source: {args.source}")
     source_types = (
         ["inquiry", "regulatory_measure"]
         if args.kind == "all"
@@ -224,12 +246,7 @@ def main() -> None:
             paginate=True,
         )
     }
-    safe_rows = sanitize_company_codes(rows, known_codes)
-    count = sb_upsert(
-        "risk_source_documents",
-        safe_rows,
-        on_conflict="source_doc_id",
-    )
+    count = persist_documents(rows, known_codes, sb_upsert)
     log(f"已幂等写入 risk_source_documents：{count} 条")
 
 

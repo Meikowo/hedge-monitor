@@ -4,11 +4,13 @@ from pathlib import Path
 
 from scripts.fetch_risk_documents import (
     deduplicate_documents,
+    persist_documents,
     prepare_document,
     sanitize_company_codes,
 )
 from scripts.risk_relevance import assess_relevance
 from scripts.risk_sources.sse import normalize_document, unwrap_jsonp
+from scripts.risk_sources.sse import iter_documents
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -106,6 +108,42 @@ class SseRiskSourceTest(unittest.TestCase):
                 source_type="regulatory_measure",
             )
 
+    def test_iter_documents_paginates_top_level_result(self):
+        class Response:
+            def __init__(self, page):
+                self.content = (
+                    'jsonpCallback({"result":[{"docId":"SSE-%s",'
+                    '"docTitle":"监管函","docURL":"/doc/%s.pdf"}],'
+                    '"pageHelp":{"pageCount":2}})' % (page, page)
+                ).encode()
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.headers = {}
+                self.calls = 0
+
+            def get(self, *_args, **_kwargs):
+                self.calls += 1
+                return Response(self.calls)
+
+        session = Session()
+        rows = list(
+            iter_documents(
+                source_type="inquiry",
+                start_date="2026-01-01",
+                end_date="2026-12-31",
+                page_size=1,
+                max_pages=2,
+                pause_seconds=0,
+                session=session,
+            )
+        )
+        self.assertEqual([row["source_doc_id"] for row in rows], ["sse:SSE-1", "sse:SSE-2"])
+        self.assertEqual(session.calls, 2)
+
 
 class RiskRelevanceGateTest(unittest.TestCase):
     def test_direct_derivative_risk_cooccurrence_is_candidate(self):
@@ -115,6 +153,7 @@ class RiskRelevanceGateTest(unittest.TestCase):
             "inquiry",
         )
         self.assertTrue(result.candidate)
+        self.assertTrue(result.relevant)
         self.assertIn("期货", result.matched_derivative_terms)
         self.assertIn("未经授权", result.matched_risk_terms)
 
@@ -165,6 +204,15 @@ class RiskRelevanceGateTest(unittest.TestCase):
                 result = assess_relevance("监管问询函", text, "inquiry")
                 self.assertFalse(result.candidate)
 
+    def test_far_apart_risk_signal_is_candidate_but_not_rule_confirmed(self):
+        result = assess_relevance(
+            "关于公司商品期货业务的问询函",
+            "商品期货交易情况。" + ("普通经营说明。" * 80) + "公司另有信息披露违规。",
+            "inquiry",
+        )
+        self.assertTrue(result.candidate)
+        self.assertFalse(result.relevant)
+
 
 class RiskDocumentIngestionTest(unittest.TestCase):
     def test_prepare_document_sets_candidate_terms_and_status(self):
@@ -191,6 +239,7 @@ class RiskDocumentIngestionTest(unittest.TestCase):
         self.assertIn("未经授权", prepared["matched_risk_terms"])
         self.assertIn("fetched_at", prepared)
         self.assertIn("未经授权", prepared["raw_metadata"]["gate_excerpt"])
+        self.assertTrue(prepared["raw_metadata"]["rule_relevant"])
 
     def test_deduplicate_documents_keeps_one_row_per_source_id(self):
         rows = [
@@ -211,6 +260,23 @@ class RiskDocumentIngestionTest(unittest.TestCase):
         self.assertEqual(sanitized[0]["code"], "600001")
         self.assertIsNone(sanitized[1]["code"])
 
+    def test_persistence_uses_idempotent_source_document_upsert(self):
+        calls = []
+
+        def fake_upsert(table, rows, *, on_conflict):
+            calls.append((table, rows, on_conflict))
+            return len(rows)
+
+        count = persist_documents(
+            [{"source_doc_id": "sse:1", "code": "900999"}],
+            set(),
+            fake_upsert,
+        )
+        self.assertEqual(count, 1)
+        self.assertEqual(calls[0][0], "risk_source_documents")
+        self.assertIsNone(calls[0][1][0]["code"])
+        self.assertEqual(calls[0][2], "source_doc_id")
+
 
 class RiskWorkflowContractTest(unittest.TestCase):
     def test_manual_poc_workflow_defaults_to_dry_run_and_guards_write(self):
@@ -223,6 +289,8 @@ class RiskWorkflowContractTest(unittest.TestCase):
         self.assertIn("I_UNDERSTAND", text)
         self.assertIn("group: risk-sources", text)
         self.assertIn("python scripts/fetch_risk_documents.py", text)
+        self.assertIn("default: ''", text)
+        self.assertIn("--source sse", text)
         self.assertNotRegex(text, r"(?m)^\s*schedule:")
 
 

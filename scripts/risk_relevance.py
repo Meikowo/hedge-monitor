@@ -88,6 +88,7 @@ COMPANY_EVENT_TERMS = (
 @dataclass(frozen=True)
 class RelevanceAssessment:
     candidate: bool
+    relevant: bool
     matched_derivative_terms: tuple[str, ...]
     matched_risk_terms: tuple[str, ...]
     reason: str
@@ -103,6 +104,19 @@ def _matches(text: str, terms: tuple[str, ...]) -> tuple[str, ...]:
             if start >= 0 and "授权" in text[start:start + 12]:
                 hits.append(term)
     return tuple(hits)
+
+
+def _positions(text: str, terms: tuple[str, ...]) -> tuple[int, ...]:
+    positions: list[int] = []
+    for term in terms:
+        start = 0
+        while True:
+            index = text.find(term, start)
+            if index < 0:
+                break
+            positions.append(index)
+            start = index + max(1, len(term))
+    return tuple(sorted(positions))
 
 
 def assess_relevance(
@@ -123,13 +137,26 @@ def assess_relevance(
     generic_policy = any(term in combined for term in GENERIC_POLICY_TERMS)
     concrete_event = any(term in combined for term in COMPANY_EVENT_TERMS)
     if generic_policy and not concrete_event:
-        return RelevanceAssessment(False, derivative, risk, "仅通用政策，未见公司具体风险事件")
+        return RelevanceAssessment(
+            False, False, derivative, risk, "仅通用政策，未见公司具体风险事件"
+        )
     if not derivative:
-        return RelevanceAssessment(False, derivative, risk, "未命中衍生品业务词")
-    if not risk:
-        return RelevanceAssessment(False, derivative, risk, "命中衍生品词但未命中风险事实词")
+        return RelevanceAssessment(False, False, derivative, risk, "未命中衍生品业务词")
 
-    if source_type in {"inquiry", "regulatory_measure", "disciplinary_action",
-                       "administrative_penalty"}:
-        return RelevanceAssessment(True, derivative, risk, "监管来源同时命中衍生品与风险词")
-    return RelevanceAssessment(True, derivative, risk, "同时命中衍生品与具体风险词")
+    derivative_positions = _positions(combined, derivative)
+    risk_positions = _positions(combined, risk)
+    relevant = any(
+        abs(derivative_pos - risk_pos) <= 320
+        for derivative_pos in derivative_positions
+        for risk_pos in risk_positions
+    )
+    if relevant and source_type in {
+        "inquiry", "regulatory_measure", "disciplinary_action",
+        "administrative_penalty",
+    }:
+        reason = "监管来源窗口内同时命中衍生品与风险词"
+    elif relevant:
+        reason = "窗口内同时命中衍生品与具体风险词"
+    else:
+        reason = "命中衍生品业务词，风险事实待模型复核"
+    return RelevanceAssessment(True, relevant, derivative, risk, reason)

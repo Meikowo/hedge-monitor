@@ -17,9 +17,9 @@ on:
         required: true
         default: '2024-01-01'
       end_date:
-        description: '结束日期 YYYY-MM-DD'
-        required: true
-        default: '2026-07-30'
+        description: '结束日期 YYYY-MM-DD（留空=运行当天）'
+        required: false
+        default: ''
       max_pages:
         description: '每类来源最多页数（每页100条）'
         required: true
@@ -85,12 +85,15 @@ jobs:
           WRITE: ${{ github.event.inputs.write }}
         run: |
           args=(
+            --source sse
             --kind "$KIND"
             --start-date "$START_DATE"
-            --end-date "$END_DATE"
             --max-pages "$MAX_PAGES"
             --limit "$LIMIT"
           )
+          if [ -n "$END_DATE" ]; then
+            args+=(--end-date "$END_DATE")
+          fi
           if [ "$FETCH_BODY" = "false" ]; then
             args+=(--no-fetch-body)
           fi
