@@ -1,0 +1,107 @@
+name: Risk Cases POC (SSE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: '监管来源类型'
+        required: true
+        type: choice
+        options:
+          - all
+          - inquiry
+          - regulatory_measure
+        default: all
+      start_date:
+        description: '起始日期 YYYY-MM-DD'
+        required: true
+        default: '2024-01-01'
+      end_date:
+        description: '结束日期 YYYY-MM-DD'
+        required: true
+        default: '2026-07-30'
+      max_pages:
+        description: '每类来源最多页数（每页100条）'
+        required: true
+        default: '5'
+      limit:
+        description: '本次最多处理文档数'
+        required: true
+        default: '500'
+      fetch_body:
+        description: '读取正文后再筛选'
+        required: true
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+        default: 'true'
+      write:
+        description: '写入 Supabase（默认仅生成快照）'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+      confirm_write:
+        description: 'write=true 时必须填写 I_UNDERSTAND'
+        required: false
+        default: ''
+
+concurrency:
+  group: risk-sources
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Validate write confirmation
+        env:
+          WRITE: ${{ github.event.inputs.write }}
+          CONFIRM_WRITE: ${{ github.event.inputs.confirm_write }}
+        run: |
+          if [ "$WRITE" = "true" ] && [ "$CONFIRM_WRITE" != "I_UNDERSTAND" ]; then
+            echo "write=true requires confirm_write=I_UNDERSTAND"
+            exit 1
+          fi
+      - name: Discover and classify official documents
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          KIND: ${{ github.event.inputs.kind }}
+          START_DATE: ${{ github.event.inputs.start_date }}
+          END_DATE: ${{ github.event.inputs.end_date }}
+          MAX_PAGES: ${{ github.event.inputs.max_pages }}
+          LIMIT: ${{ github.event.inputs.limit }}
+          FETCH_BODY: ${{ github.event.inputs.fetch_body }}
+          WRITE: ${{ github.event.inputs.write }}
+        run: |
+          args=(
+            --kind "$KIND"
+            --start-date "$START_DATE"
+            --end-date "$END_DATE"
+            --max-pages "$MAX_PAGES"
+            --limit "$LIMIT"
+          )
+          if [ "$FETCH_BODY" = "false" ]; then
+            args+=(--no-fetch-body)
+          fi
+          if [ "$WRITE" = "true" ]; then
+            args+=(--write)
+          fi
+          python scripts/fetch_risk_documents.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: risk-poc-${{ github.run_id }}
+          path: output/risk_documents_sse_*.csv
+          if-no-files-found: ignore
+          retention-days: 30

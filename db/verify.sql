@@ -73,3 +73,19 @@ left join periodic_metric_items m using (report_id)
 group by d.report_id, r.code, r.name, r.report_period, d.disclosure_status;
 select count(*) as forbidden_non_reported
 from periodic_metric_items where value_origin <> 'reported';
+
+-- V12. M6a 衍生品风险案例库（初始预期：4 张表 RLS=true；正式案例必须有官方证据）
+select tablename, rowsecurity from pg_tables
+where schemaname = 'public'
+  and tablename in (
+    'risk_source_documents','derivative_risk_cases',
+    'risk_case_documents','risk_case_evidence')
+order by tablename;
+select source_org, source_type, status, count(*)
+from risk_source_documents
+group by source_org, source_type, status
+order by source_org, source_type, status;
+select count(*) as cases_without_evidence
+from derivative_risk_cases c
+left join risk_case_evidence e using (case_key)
+where e.case_key is null;

@@ -1,7 +1,7 @@
 # schema_snapshot.md —— 数据契约（人读版）
 
 > 与 db/001_init.sql 同步维护；表结构变更的会话结束时必须更新本文件。
-> 快照版本：004（2026-07-26，升级 M4a v1.5 数值与套期会计契约）
+> 快照版本：005（2026-07-30，新增 M6a 衍生品风险案例独立数据域）
 
 ## 层次关系
 
@@ -13,7 +13,34 @@ companies ──(code)── announcements ──1:1── extractions ──1:N
 companies ──(code)── periodic_reports ──1:1── periodic_derivatives
                               └──────────1:N── periodic_metric_items
                               └──────────1:N── periodic_hedge_accounting_items
+
+companies ──(code)── risk_source_documents
+companies ──(code)── derivative_risk_cases
+risk_source_documents ──N:M── derivative_risk_cases（risk_case_documents）
+             └─────────────── risk_case_evidence ───────┘
 ```
+
+## M6a 衍生品风险案例独立数据域
+
+### risk_source_documents（官方来源文档）
+
+按 `source_doc_id` 主键及 `(source_org, official_doc_id)` 唯一约束去重。记录来源机构、
+来源类型、公司、标题、日期、强制 HTTPS 原文链接、文档格式、哈希/本地路径、正文字符数、
+命中的衍生品与风险词、原始元数据和处理状态。状态机为 discovered → candidate →
+relevant / irrelevant → extracted；失败可标记 failed。官方公司代码不在当前公司主表时
+允许置空，不丢弃来源文档。
+
+### derivative_risk_cases（正式风险案例）
+
+一案一行，必须关联公司，风险类型限定为 PRD 5.8 的八类。保存事件日期、工具、品种、
+摘要、金额口径、监管措施、结果、案例状态、模型与置信度。规则候选不得直接写入本表；
+必须经过正文相关性、模型结构化和官方证据回验。
+
+### risk_case_documents / risk_case_evidence
+
+`risk_case_documents` 以复合主键连接案例与问询、回复、措施、处罚、整改及其他支持文档。
+`risk_case_evidence` 保存字段级原文引文、页码/段落、抽取值、官方 URL、引文与数值回验
+状态及置信度。正式案例验收要求至少一条官方来源证据。
 
 ## periodic_reports（定期报告元数据与处理状态）
 
@@ -139,9 +166,10 @@ event_members：ann_id PK → event_key。整层由 `build_events.py` 全量重�
 
 ## RLS
 
-定期报告新增表同样启用 RLS；anon/authenticated 仅 select；写入只经 service_role（绕过 RLS）。
-新表显式 `GRANT SELECT` 给前端角色、显式授予 service_role 写权限，以兼容 Supabase 2026
-年开始推行的“新表默认不暴露 Data API”行为。两个前端视图均为 security_invoker。
+定期报告与风险案例新增表均启用 RLS；anon/authenticated 仅 select；写入只经
+service_role（绕过 RLS）。新表显式 `GRANT SELECT` 给前端角色、显式授予 service_role
+写权限，以兼容 Supabase 2026 年开始推行的“新表默认不暴露 Data API”行为。两个前端
+视图均为 security_invoker；M6a 当前尚未建立前端视图。
 
 ## 重新生成快照的 SQL（供核对线上库与本文件一致性）
 

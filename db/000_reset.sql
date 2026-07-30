@@ -13,6 +13,10 @@ drop view if exists public.v_announcements_with_events;
 drop view if exists public.v_ann_flow;
 drop view if exists public.v_events;
 
+drop table if exists public.risk_case_evidence;
+drop table if exists public.risk_case_documents;
+drop table if exists public.derivative_risk_cases;
+drop table if exists public.risk_source_documents;
 drop table if exists public.periodic_metric_items;
 drop table if exists public.periodic_derivatives;
 drop table if exists public.periodic_reports;
