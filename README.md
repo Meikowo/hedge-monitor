@@ -24,7 +24,7 @@ M4a 年报侧独立为 `periodic_reports`（元数据）→ `periodic_derivative
 ```
 config/keywords.yml     召回词表（查全率的单一事实源，加词即生效）
 data/                   iFind 公司表（季度替换后跑 import workflow）
-db/                     000_reset → 001_init → 002_periodic_reports → 003_periodic_hardening → verify
+db/                     000_reset → 001_init … 006_risk_media_leads → verify
 scripts/                common/cninfo 基础层 + 5 个业务脚本
 .github/workflows/      公告管线 + pages + periodic-poc（年报小样本，手动）
 docs/                   PRD、PROJECT、COLLAB_SOP、schema_snapshot、worklogs
@@ -48,9 +48,10 @@ output/                 运行快照（gitignore，Actions 里以 artifact 保�
    和 `db/003_periodic_hardening.sql`。跑 `db/verify.sql` 验收。
 
 3. **秘钥**（名字固定，值只出现在这两处）：
-   - GitHub repo → Settings → Secrets and variables → Actions，新建 3 个：
-     `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`LLM_API_KEY`（= MiniMax key）
-   - 本地：`cp .env.example .env` 后填同样 3 个值（本地跑脚本才需要）
+   - GitHub repo → Settings → Secrets and variables → Actions：核心 3 个为
+     `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`LLM_API_KEY`（= MiniMax key）；
+     启用 M6a 新闻线索时另加 `TAVILY_API_KEY`。
+   - 本地：`cp .env.example .env` 后填需要本地运行的同名值。
 
 4. **探活**：Actions → *Probe MiniMax Reachability* → Run。
    绿色 = 抽取跑 Actions；红色 = 把日志贴回会话，抽取降级本地跑（脚本完全同一套）。
@@ -78,6 +79,7 @@ output/                 运行快照（gitignore，Actions 里以 artifact 保�
 | 改抽取提示词 | 改 `scripts/prompt_extract.py` 并**递增 PROMPT_VERSION** |
 | 重抽某几条 | 本地 `python scripts/extract_announcements.py --ids <ann_id> ...` |
 | 年报 POC | Actions → Periodic Reports POC；按 metadata → locate → extract，extract 必须勾选确认 |
+| 新闻风险线索 | Actions → Risk Media Leads (Tavily)；手动默认 dry-run，定时任务每日两次幂等写入私有线索表 |
 | Supabase 保活 | daily 每日写库即天然保活；若 Actions 断档超一周需手动进后台看一眼 |
 
 ## 本地运行

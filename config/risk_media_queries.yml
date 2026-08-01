@@ -1,0 +1,25 @@
+queries:
+  - key: major_hedge_loss
+    query: A股 上市公司 套期保值 重大亏损
+  - key: derivative_loss
+    query: A股 上市公司 衍生品 重大损失
+  - key: futures_liquidation
+    query: A股 上市公司 期货 爆仓 强制平仓
+  - key: margin_shortfall
+    query: A股 上市公司 期货 保证金不足
+  - key: fx_hedge_loss
+    query: A股 上市公司 外汇套保 亏损
+  - key: forward_fx_loss
+    query: A股 上市公司 远期外汇 损失
+  - key: commodity_violation
+    query: 上市公司 商品期货 套保 违规
+  - key: derivative_penalty
+    query: 上市公司 衍生品 违规 处罚
+  - key: hedge_inquiry
+    query: 上市公司 套期保值 问询函
+  - key: derivative_control
+    query: 上市公司 衍生品 内控缺陷
+  - key: option_speculation
+    query: 上市公司 期权 投机 亏损
+  - key: swap_loss
+    query: 上市公司 掉期 互换 损失

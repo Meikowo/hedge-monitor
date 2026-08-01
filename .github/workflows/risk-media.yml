@@ -1,0 +1,77 @@
+name: Risk Media Leads (Tavily)
+
+on:
+  workflow_dispatch:
+    inputs:
+      query_limit:
+        description: '本次查询组数量（硬上限 12）'
+        required: true
+        default: '1'
+      max_results:
+        description: '每组最多结果数（硬上限 10）'
+        required: true
+        default: '3'
+      time_range:
+        description: '新闻时间范围'
+        required: true
+        type: choice
+        options:
+          - day
+          - week
+          - month
+        default: day
+      write:
+        description: '写入私有媒体线索表'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+  schedule:
+    - cron: '15 0 * * *'
+    - cron: '15 12 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: risk-media
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Collect Tavily media leads
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          QUERY_LIMIT: ${{ github.event_name == 'schedule' && '12' || inputs.query_limit }}
+          MAX_RESULTS: ${{ github.event_name == 'schedule' && '10' || inputs.max_results }}
+          TIME_RANGE: ${{ github.event_name == 'schedule' && 'day' || inputs.time_range }}
+          WRITE: ${{ github.event_name == 'schedule' && 'true' || inputs.write }}
+        run: |
+          args=(
+            --query-limit "$QUERY_LIMIT"
+            --max-results "$MAX_RESULTS"
+            --time-range "$TIME_RANGE"
+          )
+          if [ "$WRITE" = "true" ]; then
+            args+=(--write)
+          fi
+          python scripts/fetch_risk_media_leads.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: risk-media-${{ github.run_id }}
+          path: output/risk_media_leads_*.csv
+          if-no-files-found: ignore
+          retention-days: 30

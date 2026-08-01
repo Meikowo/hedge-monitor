@@ -1,7 +1,7 @@
 # schema_snapshot.md —— 数据契约（人读版）
 
 > 与 db/001_init.sql 同步维护；表结构变更的会话结束时必须更新本文件。
-> 快照版本：005（2026-07-30，新增 M6a 衍生品风险案例独立数据域）
+> 快照版本：006（2026-08-01，新增私有新闻风险线索层）
 
 ## 层次关系
 
@@ -18,6 +18,8 @@ companies ──(code)── risk_source_documents
 companies ──(code)── derivative_risk_cases
 risk_source_documents ──N:M── derivative_risk_cases（risk_case_documents）
              └─────────────── risk_case_evidence ───────┘
+
+companies ──(code，可空)── risk_media_leads（未核实、非正式案例）
 ```
 
 ## M6a 衍生品风险案例独立数据域
@@ -41,6 +43,13 @@ relevant / irrelevant → extracted；失败可标记 failed。官方公司代�
 `risk_case_documents` 以复合主键连接案例与问询、回复、措施、处罚、整改及其他支持文档。
 `risk_case_evidence` 保存字段级原文引文、页码/段落、抽取值、官方 URL、引文与数值回验
 状态及置信度。正式案例验收要求至少一条官方来源证据。
+
+### risk_media_leads（私有新闻风险线索）
+
+按规范化 URL 的 SHA-256 主键幂等去重，保存 Tavily 标题、HTTPS 链接、短摘要、发布时间、
+查询组、衍生品/风险命中词、公司匹配与供应商分数。`official_corroborated=false` 且
+`need_review=true` 为默认值；本表不外键连接正式案例，不保存新闻全文。RLS 已启用，
+仅显式授权 service_role，anon/authenticated 无策略和表权限，当前前端不可读取。
 
 ## periodic_reports（定期报告元数据与处理状态）
 
@@ -166,10 +175,10 @@ event_members：ann_id PK → event_key。整层由 `build_events.py` 全量重�
 
 ## RLS
 
-定期报告与风险案例新增表均启用 RLS；anon/authenticated 仅 select；写入只经
-service_role（绕过 RLS）。新表显式 `GRANT SELECT` 给前端角色、显式授予 service_role
-写权限，以兼容 Supabase 2026 年开始推行的“新表默认不暴露 Data API”行为。两个前端
-视图均为 security_invoker；M6a 当前尚未建立前端视图。
+定期报告与官方风险案例表均启用 RLS；anon/authenticated 仅 select；写入只经
+service_role（绕过 RLS）。新闻风险线索表更加严格：不授予前端角色任何权限，只允许
+service_role。所有新表显式授权所需角色，以兼容 Supabase 2026 年开始推行的“新表默认
+不暴露 Data API”行为。两个前端视图均为 security_invoker；M6a 当前尚未建立前端视图。
 
 ## 重新生成快照的 SQL（供核对线上库与本文件一致性）
 

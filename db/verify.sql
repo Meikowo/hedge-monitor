@@ -89,3 +89,13 @@ select count(*) as cases_without_evidence
 from derivative_risk_cases c
 left join risk_case_evidence e using (case_key)
 where e.case_key is null;
+
+-- V13. M6a 新闻风险线索（预期：RLS=true；无公开策略；只作为待核实线索）
+select tablename, rowsecurity from pg_tables
+where schemaname = 'public' and tablename = 'risk_media_leads';
+select tablename, policyname, roles, cmd from pg_policies
+where schemaname = 'public' and tablename = 'risk_media_leads';
+select status, official_corroborated, count(*)
+from risk_media_leads
+group by status, official_corroborated
+order by status, official_corroborated;
