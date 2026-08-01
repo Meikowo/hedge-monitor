@@ -79,7 +79,7 @@ output/                 运行快照（gitignore，Actions 里以 artifact 保�
 | 改抽取提示词 | 改 `scripts/prompt_extract.py` 并**递增 PROMPT_VERSION** |
 | 重抽某几条 | 本地 `python scripts/extract_announcements.py --ids <ann_id> ...` |
 | 年报 POC | Actions → Periodic Reports POC；按 metadata → locate → extract，extract 必须勾选确认 |
-| 新闻风险线索 | Actions → Risk Media Leads (Tavily)；手动默认 dry-run，定时任务每日两次幂等写入私有线索表 |
+| 新闻风险线索 | Actions → Risk Media Leads (Tavily)；手动默认 dry-run，采集器相关文件变更时自动做 1-credit dry-run，定时任务每日两次幂等写入私有线索表 |
 | Supabase 保活 | daily 每日写库即天然保活；若 Actions 断档超一周需手动进后台看一眼 |
 
 ## 本地运行

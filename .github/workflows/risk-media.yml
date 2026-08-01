@@ -1,6 +1,11 @@
 name: Risk Media Leads (Tavily)
 
 on:
+  push:
+    paths:
+      - '.github/workflows/risk-media.yml'
+      - 'scripts/fetch_risk_media_leads.py'
+      - 'config/risk_media_queries.yml'
   workflow_dispatch:
     inputs:
       query_limit:
@@ -54,10 +59,10 @@ jobs:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          QUERY_LIMIT: ${{ github.event_name == 'schedule' && '12' || inputs.query_limit }}
-          MAX_RESULTS: ${{ github.event_name == 'schedule' && '10' || inputs.max_results }}
-          TIME_RANGE: ${{ github.event_name == 'schedule' && 'day' || inputs.time_range }}
-          WRITE: ${{ github.event_name == 'schedule' && 'true' || inputs.write }}
+          QUERY_LIMIT: ${{ github.event_name == 'schedule' && '12' || github.event_name == 'workflow_dispatch' && inputs.query_limit || '1' }}
+          MAX_RESULTS: ${{ github.event_name == 'schedule' && '10' || github.event_name == 'workflow_dispatch' && inputs.max_results || '3' }}
+          TIME_RANGE: ${{ github.event_name == 'workflow_dispatch' && inputs.time_range || 'day' }}
+          WRITE: ${{ github.event_name == 'schedule' && 'true' || github.event_name == 'workflow_dispatch' && inputs.write || 'false' }}
         run: |
           args=(
             --query-limit "$QUERY_LIMIT"

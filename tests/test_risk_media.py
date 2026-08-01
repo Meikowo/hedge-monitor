@@ -194,6 +194,14 @@ class RiskMediaWorkflowTest(unittest.TestCase):
             [item["cron"] for item in triggers["schedule"]],
             ["15 0 * * *", "15 12 * * *"],
         )
+        self.assertEqual(
+            triggers["push"]["paths"],
+            [
+                ".github/workflows/risk-media.yml",
+                "scripts/fetch_risk_media_leads.py",
+                "config/risk_media_queries.yml",
+            ],
+        )
         inputs = triggers["workflow_dispatch"]["inputs"]
         self.assertEqual(inputs["write"]["default"], "false")
         self.assertEqual(inputs["query_limit"]["default"], "1")
@@ -201,6 +209,9 @@ class RiskMediaWorkflowTest(unittest.TestCase):
 
         env = data["jobs"]["collect"]["steps"][3]["env"]
         self.assertEqual(env["TAVILY_API_KEY"], "${{ secrets.TAVILY_API_KEY }}")
+        self.assertTrue(env["QUERY_LIMIT"].endswith("|| '1' }}"))
+        self.assertTrue(env["MAX_RESULTS"].endswith("|| '3' }}"))
+        self.assertTrue(env["WRITE"].endswith("|| 'false' }}"))
         command = data["jobs"]["collect"]["steps"][3]["run"]
         self.assertIn("--query-limit \"$QUERY_LIMIT\"", command)
         self.assertIn("--max-results \"$MAX_RESULTS\"", command)
