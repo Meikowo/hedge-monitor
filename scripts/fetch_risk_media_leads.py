@@ -31,6 +31,22 @@ RISK_TERMS = (
     "保证金不足", "未经授权", "超授权", "投机", "违规", "处罚", "问询函",
     "监管问询", "内控缺陷", "追责", "整改", "流动性风险",
 )
+HYPOTHETICAL_TERMS = (
+    "若", "如果", "可能", "或将", "一旦", "不排除", "不能排除",
+    "风险提示", "风险因素", "假设", "预计",
+)
+ACTUAL_EVENT_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"(?:实际|累计|合计|确认|发生|产生|造成|导致|形成|录得|出现).{0,24}(?:亏损|损失|爆仓|强制平仓)",
+        r"(?:亏损|损失).{0,12}(?:金额|合计|达到|达|为|约|人民币|\d)",
+        r"(?:收到|下发|出具|发布).{0,20}(?:问询函|监管问询|关注函)",
+        r"(?:受到|遭到|被处以|给予).{0,20}(?:处罚|处分|通报批评|责令整改)",
+        r"(?:行政处罚|立案调查|纪律处分|通报批评|责令整改)",
+        r"(?:被|遭|发生).{0,12}(?:强制平仓|爆仓)",
+        r"(?:未经授权|超授权).{0,20}(?:开展|交易|操作)",
+    )
+)
 
 
 def bounded_limits(query_limit: int, max_results: int) -> tuple[int, int]:
@@ -107,6 +123,35 @@ def _unique_matches(text: str, terms: tuple[str, ...]) -> list[str]:
     return [term for term in terms if term in text]
 
 
+def _is_hypothetical(text: str) -> bool:
+    return any(term in text for term in HYPOTHETICAL_TERMS)
+
+
+def _is_actual_event(text: str) -> bool:
+    return any(pattern.search(text) for pattern in ACTUAL_EVENT_PATTERNS)
+
+
+def relevant_contexts(title: str, snippet: str) -> list[str]:
+    """仅保留同一局部语境中的已发生衍生品风险，避免跨段拼词。"""
+    contexts: list[str] = []
+    title = title.strip()
+    segments = [title] + [
+        segment.strip()
+        for segment in re.split(r"[。！？；\n]+", snippet)
+        if segment.strip()
+    ]
+    for index, segment in enumerate(segments):
+        if not _unique_matches(segment, DERIVATIVE_TERMS):
+            continue
+        if not _unique_matches(segment, RISK_TERMS):
+            continue
+        if _is_hypothetical(segment):
+            continue
+        if index == 0 or _is_actual_event(segment):
+            contexts.append(segment)
+    return contexts
+
+
 def _lead_key(url: str) -> str:
     digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:32]
     return f"tavily:{digest}"
@@ -120,10 +165,11 @@ def prepare_leads(
     for result in results:
         title = str(result.get("title") or "").strip()
         snippet = str(result.get("content") or "").strip()
-        combined = f"{title}\n{snippet}"
-        derivative = _unique_matches(combined, DERIVATIVE_TERMS)
-        risk = _unique_matches(combined, RISK_TERMS)
-        if not title or not derivative or not risk:
+        contexts = relevant_contexts(title, snippet)
+        matched_text = "\n".join(contexts)
+        derivative = _unique_matches(matched_text, DERIVATIVE_TERMS)
+        risk = _unique_matches(matched_text, RISK_TERMS)
+        if not title or not contexts:
             continue
         try:
             url = normalize_url(str(result.get("url") or ""))
@@ -146,7 +192,7 @@ def prepare_leads(
             "status": "new",
             "need_review": True,
             "official_corroborated": False,
-            "raw_metadata": {},
+            "raw_metadata": {"matched_contexts": contexts[:3]},
         })
     return leads
 

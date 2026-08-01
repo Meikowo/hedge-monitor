@@ -122,6 +122,31 @@ class TavilyMediaCollectorTest(unittest.TestCase):
         self.assertEqual(merged[0]["query_keys"], ["loss", "inquiry"])
         self.assertEqual(merged[0]["provider_score"], 0.88)
 
+    def test_hypothetical_risk_disclosure_is_not_an_actual_media_lead(self):
+        collector = load_collector()
+        results = [
+            {
+                "title": "某公司发行股票募集说明书",
+                "url": "https://news.example.com/hypothetical",
+                "content": (
+                    "公司开展碳酸锂商品期货套期保值。"
+                    "若保证金不足，将可能导致期货头寸被强制平仓，进而造成损失。"
+                ),
+                "score": 0.7,
+            },
+            {
+                "title": "某上市公司商品期货套保发生重大亏损",
+                "url": "https://news.example.com/actual",
+                "content": "公司公告确认套期保值业务累计亏损2亿元，并收到监管问询函。",
+                "score": 0.9,
+            },
+        ]
+
+        leads = collector.prepare_leads(results, "major_hedge_loss")
+
+        self.assertEqual([lead["url"] for lead in leads], ["https://news.example.com/actual"])
+        self.assertIn("matched_contexts", leads[0]["raw_metadata"])
+
     def test_company_match_prefers_longest_exact_name(self):
         collector = load_collector()
         rows = [{
