@@ -1,7 +1,7 @@
 # schema_snapshot.md —— 数据契约（人读版）
 
 > 与 db/001_init.sql 同步维护；表结构变更的会话结束时必须更新本文件。
-> 快照版本：006（2026-08-01，新增私有新闻风险线索层）
+> 快照版本：007（2026-08-01，新增私有历史新闻回填队列）
 
 ## 层次关系
 
@@ -20,6 +20,7 @@ risk_source_documents ──N:M── derivative_risk_cases（risk_case_document
              └─────────────── risk_case_evidence ───────┘
 
 companies ──(code，可空)── risk_media_leads（未核实、非正式案例）
+risk_media_backfill_windows ──(进度队列)── risk_media_leads（按 URL 幂等汇入）
 ```
 
 ## M6a 衍生品风险案例独立数据域
@@ -50,6 +51,14 @@ relevant / irrelevant → extracted；失败可标记 failed。官方公司代�
 查询组、衍生品/风险命中词、公司匹配与供应商分数。`official_corroborated=false` 且
 `need_review=true` 为默认值；本表不外键连接正式案例，不保存新闻全文。RLS 已启用，
 仅显式授权 service_role，anon/authenticated 无策略和表权限，当前前端不可读取。
+
+### risk_media_backfill_windows（私有历史回填进度）
+
+按查询组和精确日期范围建立确定性窗口，保存年度、粒度、状态、尝试次数、原始结果数、线索数、
+credit 消耗和异常。年度窗口命中每窗口结果上限时拆为四个季度；失败最多重试 3 次，运行超过
+3 小时可恢复。表启用 RLS 且只授权 service_role，不与正式风险案例建立外键，也不向前端公开。
+窗口由仅 service_role 可执行的原子领取函数加锁；媒体线索由受控合并函数写入，只合并机器发现字段，
+不得覆盖人工维护的 `status`、`need_review` 或 `official_corroborated`。
 
 ## periodic_reports（定期报告元数据与处理状态）
 

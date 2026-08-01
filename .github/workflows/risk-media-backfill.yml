@@ -1,0 +1,93 @@
+name: Risk Media Backfill (Tavily)
+
+on:
+  push:
+    paths:
+      - '.github/workflows/risk-media-backfill.yml'
+      - 'scripts/backfill_risk_media_leads.py'
+      - 'scripts/fetch_risk_media_leads.py'
+      - 'config/risk_media_queries.yml'
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: '历史起始年份（最早 2000）'
+        required: true
+        default: '2000'
+      end_year:
+        description: '历史结束年份（最晚 2025）'
+        required: true
+        default: '2025'
+      dry_year:
+        description: 'dry-run 搜索年份'
+        required: true
+        default: '2025'
+      window_limit:
+        description: '本次窗口数（硬上限 12）'
+        required: true
+        default: '1'
+      max_results:
+        description: '每窗口最多结果（硬上限 10）'
+        required: true
+        default: '3'
+      write:
+        description: '写入私有线索与进度表'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+  schedule:
+    - cron: '45 12 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: risk-media-tavily
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Backfill historical Tavily media leads
+        if: github.event_name != 'push'
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          START_YEAR: ${{ github.event_name == 'schedule' && '2000' || github.event_name == 'workflow_dispatch' && inputs.start_year || '2000' }}
+          END_YEAR: ${{ github.event_name == 'schedule' && '2025' || github.event_name == 'workflow_dispatch' && inputs.end_year || '2025' }}
+          DRY_YEAR: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_year || '2025' }}
+          WINDOW_LIMIT: ${{ github.event_name == 'schedule' && '12' || github.event_name == 'workflow_dispatch' && inputs.window_limit || '1' }}
+          MAX_RESULTS: ${{ github.event_name == 'schedule' && '10' || github.event_name == 'workflow_dispatch' && inputs.max_results || '3' }}
+          WRITE: ${{ github.event_name == 'schedule' && 'true' || github.event_name == 'workflow_dispatch' && inputs.write || 'false' }}
+        run: |
+          args=(
+            --start-year "$START_YEAR"
+            --end-year "$END_YEAR"
+            --dry-year "$DRY_YEAR"
+            --window-limit "$WINDOW_LIMIT"
+            --max-results "$MAX_RESULTS"
+          )
+          if [ "$WRITE" = "true" ]; then
+            args+=(--write)
+          fi
+          python scripts/backfill_risk_media_leads.py "${args[@]}"
+      - name: Validate historical backfill on push
+        if: github.event_name == 'push'
+        run: python -m unittest tests.test_risk_media tests.test_risk_media_backfill -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: risk-media-backfill-${{ github.run_id }}
+          path: output/risk_media_backfill*.csv
+          if-no-files-found: ignore
+          retention-days: 30

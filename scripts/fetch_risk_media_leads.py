@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import re
 from pathlib import Path
@@ -60,19 +61,44 @@ def build_search_payload(
     query: str,
     *,
     max_results: int,
-    time_range: str,
+    time_range: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    exact_dates = start_date is not None or end_date is not None
+    if exact_dates and (not start_date or not end_date):
+        raise ValueError("start_date and end_date must be provided together")
+    if exact_dates and time_range:
+        raise ValueError("time_range cannot be combined with exact dates")
+    if not exact_dates and not time_range:
+        raise ValueError("provide time_range or an exact date range")
+    if exact_dates:
+        try:
+            start = dt.date.fromisoformat(start_date or "")
+            end = dt.date.fromisoformat(end_date or "")
+        except ValueError as exc:
+            raise ValueError("exact dates must use valid YYYY-MM-DD values") from exc
+        if start.isoformat() != start_date or end.isoformat() != end_date:
+            raise ValueError("exact dates must use canonical YYYY-MM-DD values")
+        if end < start:
+            raise ValueError("end_date must not precede start_date")
+
+    payload = {
         "query": query,
         "topic": "news",
         "search_depth": "basic",
         "max_results": max_results,
-        "time_range": time_range,
         "include_answer": False,
         "include_raw_content": False,
         "include_images": False,
         "include_usage": True,
     }
+    if exact_dates:
+        payload["start_date"] = start_date
+        payload["end_date"] = end_date
+    else:
+        payload["time_range"] = time_range
+    return payload
 
 
 def search_tavily(
@@ -80,7 +106,9 @@ def search_tavily(
     query: str,
     *,
     max_results: int,
-    time_range: str,
+    time_range: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     session: Any = None,
 ) -> dict[str, Any]:
     if not api_key:
@@ -96,6 +124,8 @@ def search_tavily(
             query,
             max_results=max_results,
             time_range=time_range,
+            start_date=start_date,
+            end_date=end_date,
         ),
         timeout=45,
     )
@@ -263,6 +293,19 @@ def match_companies(
     return out
 
 
+def persist_leads(rows: list[dict[str, Any]], sb_request_func: Any) -> int:
+    """Use the database merge policy so discovery never resets review-owned fields."""
+    if not rows:
+        return 0
+    response = sb_request_func(
+        "POST",
+        "rpc/upsert_risk_media_leads",
+        json_body={"p_rows": rows},
+    )
+    value = response.json()
+    return int(value or 0)
+
+
 def load_queries(path: Path = DEFAULT_QUERY_FILE) -> list[dict[str, str]]:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     queries = data.get("queries") or []
@@ -292,9 +335,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     try:
-        from scripts.common import env, log, sb_select, sb_upsert, snapshot_csv
+        from scripts.common import env, log, sb_request, sb_select, snapshot_csv
     except ModuleNotFoundError:
-        from common import env, log, sb_select, sb_upsert, snapshot_csv
+        from common import env, log, sb_request, sb_select, snapshot_csv
 
     query_limit, max_results = bounded_limits(args.query_limit, args.max_results)
     queries = load_queries(args.query_file)[:query_limit]
@@ -327,11 +370,7 @@ def main() -> None:
         paginate=True,
     )
     leads = match_companies(leads, companies)
-    count = sb_upsert(
-        "risk_media_leads",
-        leads,
-        on_conflict="lead_key",
-    )
+    count = persist_leads(leads, sb_request)
     log(f"已幂等写入 risk_media_leads：{count} 条")
 
 

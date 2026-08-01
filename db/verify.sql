@@ -99,3 +99,24 @@ select status, official_corroborated, count(*)
 from risk_media_leads
 group by status, official_corroborated
 order by status, official_corroborated;
+
+-- V14. M6a 历史新闻回填队列（预期：RLS=true；仅 service_role；按年/状态可追踪）
+select tablename, rowsecurity from pg_tables
+where schemaname = 'public' and tablename = 'risk_media_backfill_windows';
+select tablename, policyname, roles, cmd from pg_policies
+where schemaname = 'public' and tablename = 'risk_media_backfill_windows';
+select routine_name, security_type
+from information_schema.routines
+where routine_schema = 'public'
+  and routine_name in (
+    'claim_risk_media_backfill_windows',
+    'upsert_risk_media_leads'
+  )
+order by routine_name;
+select calendar_year, granularity, status,
+       count(*) as windows,
+       sum(credits_used) as credits,
+       sum(lead_count) as leads
+from risk_media_backfill_windows
+group by calendar_year, granularity, status
+order by calendar_year desc, granularity, status;

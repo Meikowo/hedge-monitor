@@ -24,7 +24,7 @@ M4a 年报侧独立为 `periodic_reports`（元数据）→ `periodic_derivative
 ```
 config/keywords.yml     召回词表（查全率的单一事实源，加词即生效）
 data/                   iFind 公司表（季度替换后跑 import workflow）
-db/                     000_reset → 001_init … 006_risk_media_leads → verify
+db/                     000_reset → 001_init … 007_risk_media_backfill → verify
 scripts/                common/cninfo 基础层 + 5 个业务脚本
 .github/workflows/      公告管线 + pages + periodic-poc（年报小样本，手动）
 docs/                   PRD、PROJECT、COLLAB_SOP、schema_snapshot、worklogs
@@ -79,7 +79,7 @@ output/                 运行快照（gitignore，Actions 里以 artifact 保�
 | 改抽取提示词 | 改 `scripts/prompt_extract.py` 并**递增 PROMPT_VERSION** |
 | 重抽某几条 | 本地 `python scripts/extract_announcements.py --ids <ann_id> ...` |
 | 年报 POC | Actions → Periodic Reports POC；按 metadata → locate → extract，extract 必须勾选确认 |
-| 新闻风险线索 | Actions → Risk Media Leads (Tavily)；手动默认 dry-run，采集器相关文件变更时自动做 1-credit dry-run，定时任务每日两次幂等写入私有线索表 |
+| 新闻风险线索 | Actions → Risk Media Leads (Tavily) 每日 08:15 增量监测；Risk Media Backfill (Tavily) 每日 20:45 从 2025 年向 2000 年断点回填。手动默认均为 1-credit dry-run，结果只写私有线索表 |
 | Supabase 保活 | daily 每日写库即天然保活；若 Actions 断档超一周需手动进后台看一眼 |
 
 ## 本地运行

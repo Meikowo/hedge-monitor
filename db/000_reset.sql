@@ -13,6 +13,11 @@ drop view if exists public.v_announcements_with_events;
 drop view if exists public.v_ann_flow;
 drop view if exists public.v_events;
 
+drop function if exists public.claim_risk_media_backfill_windows(
+  smallint, smallint, integer, timestamptz
+);
+drop function if exists public.upsert_risk_media_leads(jsonb);
+drop table if exists public.risk_media_backfill_windows;
 drop table if exists public.risk_media_leads;
 drop table if exists public.risk_case_evidence;
 drop table if exists public.risk_case_documents;

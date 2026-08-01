@@ -35,13 +35,12 @@ on:
         default: 'false'
   schedule:
     - cron: '15 0 * * *'
-    - cron: '15 12 * * *'
 
 permissions:
   contents: read
 
 concurrency:
-  group: risk-media
+  group: risk-media-tavily
   cancel-in-progress: false
 
 jobs:
@@ -55,6 +54,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - name: Collect Tavily media leads
+        if: github.event_name != 'push'
         env:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -73,6 +73,9 @@ jobs:
             args+=(--write)
           fi
           python scripts/fetch_risk_media_leads.py "${args[@]}"
+      - name: Validate media collector on push
+        if: github.event_name == 'push'
+        run: python -m unittest tests.test_risk_media tests.test_risk_media_backfill -v
       - uses: actions/upload-artifact@v4
         if: always()
         with:

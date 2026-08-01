@@ -209,7 +209,7 @@ class TavilyMediaCollectorTest(unittest.TestCase):
 
 
 class RiskMediaWorkflowTest(unittest.TestCase):
-    def test_workflow_has_two_capped_schedules_and_safe_manual_default(self):
+    def test_workflow_has_one_capped_schedule_and_safe_manual_default(self):
         workflow = ROOT / ".github" / "workflows" / "risk-media.yml"
         self.assertTrue(workflow.exists(), "risk media workflow is missing")
         data = yaml.load(workflow.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
@@ -217,7 +217,7 @@ class RiskMediaWorkflowTest(unittest.TestCase):
         triggers = data["on"]
         self.assertEqual(
             [item["cron"] for item in triggers["schedule"]],
-            ["15 0 * * *", "15 12 * * *"],
+            ["15 0 * * *"],
         )
         self.assertEqual(
             triggers["push"]["paths"],
