@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="风险案例监控工作区本地结构演示" />
+    <title>Hedge Monitor · 风险案例监控 Demo</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="data.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <a class="brand" href="#top">
+          <span class="brand-mark">H</span>
+          <span class="brand-copy"><strong>HEDGE MONITOR</strong><small>套期保值数据</small></span>
+        </a>
+
+        <div class="sidebar-label">工作区</div>
+        <nav class="side-nav">
+          <a class="side-link" href="#"><span>数据看板</span><small>概览</small></a>
+          <a class="side-link" href="#"><span>套保事件</span><small>8,227</small></a>
+          <a class="side-link" href="#"><span>公告原流</span><small>18,508</small></a>
+          <a class="side-link" href="#"><span>计划与实际</span><small>88</small></a>
+          <a class="side-link is-active" href="#top" data-workspace="risk-cases" aria-current="page">
+            <span>风险案例监控</span><small>Demo</small>
+          </a>
+        </nav>
+
+        <div class="sidebar-note">
+          <span class="status-dot"></span>
+          <div><strong>固定演示数据</strong><small>非真实风险案例</small></div>
+        </div>
+      </aside>
+
+      <div class="main-column">
+        <header class="topbar">
+          <div class="breadcrumb"><strong>套保监控</strong><span>/</span><span>风险案例监控</span></div>
+          <span class="demo-badge">结构预览 · 固定演示数据</span>
+        </header>
+
+        <main id="top" class="main-content">
+          <section class="page-heading">
+            <div>
+              <h1>风险案例监控</h1>
+              <p>监管问询、处罚、重大损失与整改证据</p>
+            </div>
+            <div class="heading-actions">
+              <button class="button button--secondary" type="button" id="reset-filters">清除筛选</button>
+              <button class="button" type="button" id="export-button">导出当前结果</button>
+            </div>
+          </section>
+
+          <div class="demo-notice" role="note">
+            <strong>演示边界</strong>
+            <span>以下公司、代码、金额和文档均为固定结构样例，不代表任何真实上市公司或监管结论。</span>
+          </div>
+
+          <section class="summary-strip" aria-label="风险案例概览">
+            <article><span>正式案例形态</span><strong id="metric-cases">—</strong><small>固定演示记录</small></article>
+            <article><span>涉及公司</span><strong id="metric-companies">—</strong><small>演示公司数量</small></article>
+            <article><span>重大损失</span><strong id="metric-loss">—</strong><small>风险类型命中</small></article>
+            <article><span>处分 / 监管措施</span><strong id="metric-regulatory">—</strong><small>正式处置形态</small></article>
+          </section>
+
+          <section class="data-panel">
+            <div class="filters">
+              <label class="search-field">
+                <span>搜索</span>
+                <input id="search-input" type="search" placeholder="公司、代码、摘要、品种或监管结论" autocomplete="off" />
+              </label>
+              <label>
+                <span>年份</span>
+                <select id="year-filter"><option value="all">全部年份</option></select>
+              </label>
+              <label>
+                <span>风险类型</span>
+                <select id="risk-filter"><option value="all">全部风险类型</option></select>
+              </label>
+              <label>
+                <span>来源机构</span>
+                <select id="source-filter"><option value="all">全部来源机构</option></select>
+              </label>
+              <label>
+                <span>案例状态</span>
+                <select id="status-filter"><option value="all">全部状态</option></select>
+              </label>
+            </div>
+
+            <div class="table-toolbar">
+              <div>
+                <strong>衍生品风险案例</strong>
+                <span>按事件日期倒序 · 关键结论均附证据链</span>
+              </div>
+              <div><strong id="result-count">—</strong><span> 条结果</span></div>
+            </div>
+
+            <div class="table-scroll" id="table-scroll">
+              <table class="risk-table">
+                <thead>
+                  <tr>
+                    <th>事件日期</th>
+                    <th>公司</th>
+                    <th>风险类型</th>
+                    <th>工具 / 品种</th>
+                    <th>损失或涉案金额</th>
+                    <th>监管措施</th>
+                    <th>处理结果</th>
+                    <th>来源机构</th>
+                    <th>案例状态</th>
+                    <th>证据</th>
+                  </tr>
+                </thead>
+                <tbody id="cases-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="empty-state" hidden>
+              <strong>当前筛选没有结果</strong>
+              <span>调整筛选条件或清除筛选后重试。</span>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="drawer-overlay" id="drawer-overlay" hidden></div>
+    <aside class="detail-drawer" id="detail-drawer" aria-hidden="true" aria-label="风险案例详情">
+      <header class="drawer-header">
+        <div><span id="drawer-subtitle">案例详情</span><h2 id="drawer-title">风险案例</h2></div>
+        <button class="icon-button" type="button" id="drawer-close" aria-label="关闭详情">×</button>
+      </header>
+      <div class="drawer-content" id="drawer-content"></div>
+    </aside>
+  </body>
+</html>
