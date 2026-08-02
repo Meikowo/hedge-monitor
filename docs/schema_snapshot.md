@@ -171,11 +171,12 @@ needs_ocr / failed / skipped。候选页为 PDF 1-based 页码，连同定位词
 | stage | 股东大会通过 / 董事会通过 / 仅制度可行性 / 进展(未见计划公告) |
 | first/latest_ann_date / ann_count / ann_roles[] | 时间线概况 |
 | instruments[] / underlyings[] / venue / period_text / is_revolving / use_own_funds | 事件属性 |
-| quota jsonb | 取自最高审批阶段计划公告的 quota_items 快照 |
+| quota jsonb | 优先取最高审批层级中含已回验金额的 quota_items 快照；股东会未重列金额时回退到同事件最近额度公告 |
 | quota_source_ann_id | 额度证据链：来自哪份公告 |
 
-event_members：ann_id PK → event_key。整层由 `build_events.py` 全量重建，
-改分组规则重跑即可，不伤底层。
+event_members：ann_id PK → event_key。事件阶段仍由最高审批层级决定，不因额度来源回退而
+降级；额度快照保留 page、amount_verified 和 quote_verified。整层由 `build_events.py`
+全量重建，改分组规则重跑即可，不伤底层。
 
 ## 视图（前端读取契约）
 

@@ -12,7 +12,8 @@ build_events.py —— 事件层聚合（去重的核心）
      同公司、同锚定年、scope 有交集（或一方为空）→ 归入同一事件，否则新建。
   2. 进展/平仓/风险提示类：挂到同公司 scope 有交集、且 450 天内有计划公告的
      最近事件；找不到则单独成事件并标注「进展(未见计划公告)」。
-  3. 事件额度取自审批层级最高的计划公告（股东大会 > 董事会），
+  3. 事件阶段取最高审批层级；额度优先取最高审批层级中含已回验金额的计划公告。
+     若股东会决议只写“议案通过”而不重列金额，则回退到同事件最近的额度公告，
      记录 quota_source_ann_id 保证证据链可追溯。
 已知局限（记录在 PROJECT.md 风险节）：跨年多期计划、同年追加额度会并入
 同一事件；待真实数据验证后在 v2 细化。
@@ -131,9 +132,30 @@ def group(rows: list[dict]) -> list[Event]:
     return [e for evs in by_code.values() for e in evs]
 
 
-def pick_quota_source(ev: Event) -> dict | None:
+def pick_plan_source(ev: Event) -> dict | None:
     for role in ("计划-股东大会", "计划-董事会"):
         cands = [m for m in ev.members if m["ext"]["ann_role"] == role]
+        if cands:
+            return max(cands, key=lambda m: m["ann_date"] or "")
+    return None
+
+
+def pick_quota_source(ev: Event, quota_map: dict[str, list[dict]]) -> dict | None:
+    """选择最高审批层级中最近一份实际披露额度的计划公告。"""
+    def has_verified_amount(member: dict) -> bool:
+        return any(q.get("amount") is not None and q.get("amount_verified") is True
+                   for q in quota_map.get(member["ann_id"], []))
+
+    # 先寻找真正可展示的已回验金额，避免股东会空额度行遮蔽董事会明细。
+    for role in ("计划-股东大会", "计划-董事会"):
+        cands = [m for m in ev.members
+                 if m["ext"]["ann_role"] == role and has_verified_amount(m)]
+        if cands:
+            return max(cands, key=lambda m: m["ann_date"] or "")
+    # 没有可验证金额时仍保留最高审批层级中已有的额度原文，供人工核查。
+    for role in ("计划-股东大会", "计划-董事会"):
+        cands = [m for m in ev.members
+                 if m["ext"]["ann_role"] == role and quota_map.get(m["ann_id"])]
         if cands:
             return max(cands, key=lambda m: m["ann_date"] or "")
     return None
@@ -144,7 +166,8 @@ def fetch_quotas(ann_ids: list[str]) -> dict[str, list[dict]]:
     for i in range(0, len(ann_ids), 80):
         chunk = ann_ids[i:i + 80]
         rows = sb_select("quota_items", {
-            "select": "ann_id,scope,basis,amount,currency,raw_text,amount_verified",
+            "select": ("ann_id,scope,basis,amount,currency,raw_text,page,"
+                       "amount_verified,quote_verified"),
             "ann_id": f"in.({','.join(chunk)})",
         }, paginate=True)
         for r in rows:
@@ -164,14 +187,21 @@ def stage_of(roles: set[str]) -> str:
 
 
 def build_rows(events: list[Event]) -> tuple[list[dict], list[dict]]:
-    src_map = {e.key: pick_quota_source(e) for e in events}
-    quota_map = fetch_quotas([m["ann_id"] for m in src_map.values() if m])
+    plan_src_map = {e.key: pick_plan_source(e) for e in events}
+    plan_ann_ids = [m["ann_id"] for e in events for m in e.members
+                    if m["ext"]["ann_role"] in PLAN_ROLES]
+    quota_map = fetch_quotas(plan_ann_ids)
+    quota_src_map = {e.key: pick_quota_source(e, quota_map) for e in events}
     ev_rows, member_rows = [], []
     for e in events:
         roles = {m["ext"]["ann_role"] for m in e.members}
         dates = sorted(m["ann_date"] for m in e.members if m.get("ann_date"))
-        src = src_map[e.key]
-        base = (src or e.members[0])["ext"]
+        plan_src = plan_src_map[e.key]
+        quota_src = quota_src_map[e.key]
+        # 股东会决议常只写“议案通过”，不重复额度、期限等正文细节。
+        # 此时保持事件阶段为股东大会通过，但展示字段与额度证据回退到同事件
+        # 最近一份实际披露额度的计划公告。
+        base = (quota_src or plan_src or e.members[0])["ext"]
         union = lambda field: sorted({x for m in e.members
                                       for x in (m["ext"].get(field) or [])})
         venues = [m["ext"].get("venue") for m in e.members
@@ -195,8 +225,8 @@ def build_rows(events: list[Event]) -> tuple[list[dict], list[dict]]:
             "period_text": base.get("period_text"),
             "is_revolving": base.get("is_revolving"),
             "use_own_funds": base.get("use_own_funds"),
-            "quota": quota_map.get(src["ann_id"], []) if src else [],
-            "quota_source_ann_id": src["ann_id"] if src else None,
+            "quota": quota_map.get(quota_src["ann_id"], []) if quota_src else [],
+            "quota_source_ann_id": quota_src["ann_id"] if quota_src else None,
             "built_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         })
         member_rows += [{"event_key": e.key, "ann_id": m["ann_id"]} for m in e.members]
