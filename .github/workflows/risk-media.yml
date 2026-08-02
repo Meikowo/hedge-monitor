@@ -5,7 +5,11 @@ on:
     paths:
       - '.github/workflows/risk-media.yml'
       - 'scripts/fetch_risk_media_leads.py'
+      - 'scripts/publish_risk_media_reports.py'
       - 'config/risk_media_queries.yml'
+      - 'config/risk_media_publishers.yml'
+      - 'db/008_risk_media_public.sql'
+      - 'tests/test_risk_media_public.py'
   workflow_dispatch:
     inputs:
       query_limit:
@@ -73,13 +77,21 @@ jobs:
             args+=(--write)
           fi
           python scripts/fetch_risk_media_leads.py "${args[@]}"
+      - name: Publish sanitized media reports
+        if: github.event_name != 'push' && (github.event_name == 'schedule' || inputs.write == 'true')
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/publish_risk_media_reports.py --write
       - name: Validate media collector on push
         if: github.event_name == 'push'
-        run: python -m unittest tests.test_risk_media tests.test_risk_media_backfill -v
+        run: python -m unittest tests.test_risk_media tests.test_risk_media_backfill tests.test_risk_media_public -v
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: risk-media-${{ github.run_id }}
-          path: output/risk_media_leads_*.csv
+          path: |
+            output/risk_media_leads_*.csv
+            output/risk_media_public_*.csv
           if-no-files-found: ignore
           retention-days: 30

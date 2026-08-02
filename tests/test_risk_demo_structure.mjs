@@ -10,12 +10,13 @@ const requiredIds = [
   "risk-filter",
   "source-filter",
   "status-filter",
+  "evidence-filter",
   "reset-filters",
   "export-button",
-  "metric-cases",
+  "metric-official",
+  "metric-media",
   "metric-companies",
   "metric-loss",
-  "metric-regulatory",
   "result-count",
   "cases-body",
   "empty-state",
@@ -31,10 +32,12 @@ for (const id of requiredIds) {
 
 assert.match(html, /data-workspace=["']risk-cases["'][^>]*aria-current=["']page["']/);
 assert.match(html, /<table[^>]*class=["'][^"']*risk-table/);
-for (const heading of ["事件日期", "公司", "风险类型", "工具 / 品种", "损失或涉案金额", "监管措施", "处理结果", "来源机构", "案例状态", "证据"]) {
+for (const heading of ["事件日期", "公司", "风险类型", "工具 / 品种", "损失或涉案金额", "监管措施", "处理结果", "来源机构", "案例状态", "证据级别"]) {
   assert.match(html, new RegExp(`<th>${heading.replace(" / ", " \/ ")}</th>`), `missing ${heading} column`);
 }
 assert.match(html, /固定演示数据/);
+assert.match(html, /官方文件／已核实/);
+assert.match(html, /媒体报道／未核实/);
 assert.match(html, /href=["']styles\.css["']/);
 assert.match(html, /src=["']data\.js["'][\s\S]*src=["']app\.js["']/);
 assert.doesNotMatch(html, /supabase/i);

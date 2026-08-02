@@ -59,10 +59,10 @@
           </div>
 
           <section class="summary-strip" aria-label="风险案例概览">
-            <article><span>正式案例形态</span><strong id="metric-cases">—</strong><small>固定演示记录</small></article>
-            <article><span>涉及公司</span><strong id="metric-companies">—</strong><small>演示公司数量</small></article>
+            <article><span>官方文件／已核实</span><strong id="metric-official">—</strong><small>正式案例形态</small></article>
+            <article><span>媒体报道／未核实</span><strong id="metric-media">—</strong><small>公开媒体线索</small></article>
+            <article><span>涉及公司</span><strong id="metric-companies">—</strong><small>跨证据层去重</small></article>
             <article><span>重大损失</span><strong id="metric-loss">—</strong><small>风险类型命中</small></article>
-            <article><span>处分 / 监管措施</span><strong id="metric-regulatory">—</strong><small>正式处置形态</small></article>
           </section>
 
           <section class="data-panel">
@@ -87,12 +87,20 @@
                 <span>案例状态</span>
                 <select id="status-filter"><option value="all">全部状态</option></select>
               </label>
+              <label>
+                <span>证据级别</span>
+                <select id="evidence-filter">
+                  <option value="all">全部证据级别</option>
+                  <option value="official_verified">官方文件／已核实</option>
+                  <option value="media_unverified">媒体报道／未核实</option>
+                </select>
+              </label>
             </div>
 
             <div class="table-toolbar">
               <div>
                 <strong>衍生品风险案例</strong>
-                <span>按事件日期倒序 · 关键结论均附证据链</span>
+                <span>按事件日期倒序 · 官方文件与媒体线索分层展示</span>
               </div>
               <div><strong id="result-count">—</strong><span> 条结果</span></div>
             </div>
@@ -110,7 +118,7 @@
                     <th>处理结果</th>
                     <th>来源机构</th>
                     <th>案例状态</th>
-                    <th>证据</th>
+                    <th>证据级别</th>
                   </tr>
                 </thead>
                 <tbody id="cases-body"></tbody>

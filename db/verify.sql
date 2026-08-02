@@ -120,3 +120,42 @@ select calendar_year, granularity, status,
 from risk_media_backfill_windows
 group by calendar_year, granularity, status
 order by calendar_year desc, granularity, status;
+
+-- V15. M6b 公开媒体风险投影（公开表可读；原始线索与回填队列仍为私有）
+select tablename, rowsecurity
+from pg_tables
+where schemaname = 'public'
+  and tablename in (
+    'risk_media_reports', 'risk_media_report_sources',
+    'risk_media_leads', 'risk_media_backfill_windows'
+  )
+order by tablename;
+
+select tablename, policyname, roles, cmd
+from pg_policies
+where schemaname = 'public'
+  and tablename in (
+    'risk_media_reports', 'risk_media_report_sources',
+    'risk_media_leads', 'risk_media_backfill_windows'
+  )
+order by tablename, policyname;
+
+select grantee, table_name, privilege_type
+from information_schema.role_table_grants
+where table_schema = 'public'
+  and table_name in (
+    'risk_media_reports', 'risk_media_report_sources',
+    'risk_media_leads', 'risk_media_backfill_windows'
+  )
+order by table_name, grantee, privilege_type;
+
+select publish_status, verification_status, count(*)
+from risk_media_reports
+group by publish_status, verification_status
+order by publish_status, verification_status;
+
+select count(*) as public_media_sources
+from risk_media_report_sources;
+
+-- 使用 anon 身份通过 REST 验证：上面两张投影表可读；
+-- risk_media_leads 与 risk_media_backfill_windows 应返回权限错误或不可见。

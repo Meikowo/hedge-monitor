@@ -1,0 +1,32 @@
+publishers:
+  finance.sina.com.cn: 新浪财经
+  finance.eastmoney.com: 东方财富网
+  stcn.com: 证券时报
+  cnstock.com: 上海证券报·中国证券网
+  yicai.com: 第一财经
+  21jingji.com: 21世纪经济报道
+  caixin.com: 财新
+  cls.cn: 财联社
+  jrj.com.cn: 金融界
+  hexun.com: 和讯网
+  thepaper.cn: 澎湃新闻
+
+blocked_hosts:
+  - guba.eastmoney.com
+  - xueqiu.com
+  - weibo.com
+  - mp.weixin.qq.com
+  - zhihu.com
+
+blocked_path_terms:
+  - /caifuhao/
+  - /guba/
+  - /blog/
+  - /user/
+  - /community/
+
+official_hosts:
+  - csrc.gov.cn
+  - sse.com.cn
+  - szse.cn
+  - cninfo.com.cn
