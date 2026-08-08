@@ -17,6 +17,7 @@ import csv
 import datetime as dt
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -57,6 +58,25 @@ def env(name: str, default: str | None = None, required: bool = False) -> str | 
     if required and not val:
         raise RuntimeError(f"缺少环境变量 {name}（本地填 .env，Actions 填 repo Secrets）")
     return val
+
+
+def validate_report_ids(
+    report_ids: list[str] | None,
+    max_count: int = 10,
+) -> list[str]:
+    """验证可进入 PostgREST in.(...) 的巨潮数字报告 ID。"""
+    if not report_ids:
+        return []
+    if len(report_ids) > max_count:
+        raise ValueError(f"单次最多显式处理 {max_count} 个 report_id")
+    validated: list[str] = []
+    for value in report_ids:
+        report_id = str(value or "").strip()
+        if not re.fullmatch(r"\d{6,20}", report_id):
+            raise ValueError("report_id 必须是单个 6—20 位数字，不允许逗号或过滤表达式")
+        if report_id not in validated:
+            validated.append(report_id)
+    return validated
 
 
 # ----------------------------- Supabase PostgREST -----------------------------

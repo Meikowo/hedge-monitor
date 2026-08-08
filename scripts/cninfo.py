@@ -35,6 +35,12 @@ HEADERS = {
     "Referer": "https://www.cninfo.com.cn/new/commonUrl/pageOfSearch?url=disclosure/list/search",
     "X-Requested-With": "XMLHttpRequest",
 }
+
+
+class QueryTruncatedError(RuntimeError):
+    """查询达到分页保险上限但服务端仍报告有后续结果。"""
+
+
 SESSION = requests.Session()
 SESSION.headers.update(HEADERS)
 
@@ -113,6 +119,10 @@ def iter_query(searchkey: str = "", category: str = "", se_date: str = "",
             return
         page += 1
         polite_sleep()
+    raise QueryTruncatedError(
+        f"巨潮查询达到 {MAX_PAGES} 页仍有更多结果，拒绝静默截断："
+        f"category={category} se_date={se_date} stock={stock or 'ALL'}"
+    )
 
 
 def iter_fulltext(keyword: str, sdate: str, edate: str) -> Iterator[dict]:
