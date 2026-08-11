@@ -293,6 +293,23 @@ class RiskWorkflowContractTest(unittest.TestCase):
         self.assertIn("--source sse", text)
         self.assertNotRegex(text, r"(?m)^\s*schedule:")
 
+    def test_official_case_workflow_is_scheduled_and_write_guarded(self):
+        workflow = ROOT / ".github" / "workflows" / "risk-official.yml"
+        self.assertTrue(workflow.exists(), "official risk publisher workflow is missing")
+        text = workflow.read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", text)
+        self.assertRegex(text, r"(?m)^\s*schedule:")
+        self.assertIn("cron: '35 1 * * *'", text)
+        self.assertIn("default: '3'", text)
+        self.assertIn("default: 'false'", text)
+        self.assertIn("confirm_write", text)
+        self.assertIn("I_UNDERSTAND", text)
+        self.assertIn("group: risk-sources", text)
+        self.assertIn("SUPABASE_URL", text)
+        self.assertIn("SUPABASE_SERVICE_ROLE_KEY", text)
+        self.assertIn("python scripts/publish_official_risk_cases.py", text)
+        self.assertIn("official_risk_cases_*.json", text)
+
 
 if __name__ == "__main__":
     unittest.main()

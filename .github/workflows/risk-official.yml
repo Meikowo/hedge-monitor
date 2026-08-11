@@ -1,0 +1,67 @@
+name: Publish Official Risk Cases
+
+on:
+  schedule:
+    - cron: '35 1 * * *'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '本次最多发布的官方案例数'
+        required: true
+        default: '3'
+      write:
+        description: '写入 Supabase（定时任务固定写入）'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
+      confirm_write:
+        description: '手动 write=true 时必须填写 I_UNDERSTAND'
+        required: false
+        default: ''
+
+concurrency:
+  group: risk-sources
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Validate manual write confirmation
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          WRITE: ${{ github.event.inputs.write }}
+          CONFIRM_WRITE: ${{ github.event.inputs.confirm_write }}
+        run: |
+          if [ "$WRITE" = "true" ] && [ "$CONFIRM_WRITE" != "I_UNDERSTAND" ]; then
+            echo "write=true requires confirm_write=I_UNDERSTAND"
+            exit 1
+          fi
+      - name: Publish verified official cases
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LIMIT: ${{ github.event_name == 'schedule' && '3' || github.event.inputs.limit }}
+          WRITE: ${{ github.event_name == 'schedule' && 'true' || github.event.inputs.write }}
+        run: |
+          args=(--limit "${LIMIT:-3}")
+          if [ "$WRITE" = "true" ]; then
+            args+=(--write)
+          fi
+          python scripts/publish_official_risk_cases.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: official-risk-cases-${{ github.run_id }}
+          path: output/official_risk_cases_*.json
+          if-no-files-found: ignore
+          retention-days: 30

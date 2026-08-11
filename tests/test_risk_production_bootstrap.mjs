@@ -36,8 +36,13 @@ const [cases, sourceDocuments, documents, evidence, reports, sources] = await Pr
 ]);
 
 assert.ok(Date.now() - startedAt < 60000, "risk bootstrap exceeded 60 seconds");
+assert.ok(cases.length >= 3, "expected at least three verified official risk cases");
+assert.ok(cases.every((row) => documents.some((item) => item.case_key === row.case_key)), "every official case needs a source relation");
+assert.ok(cases.every((row) => evidence.some((item) => item.case_key === row.case_key && item.quote_verified === true && item.value_verified === true)), "every official case needs verified evidence");
+assert.ok(documents.every((row) => sourceDocuments.some((item) => item.source_doc_id === row.source_doc_id)), "official case relation points to a missing source document");
 assert.ok(reports.length > 0, "expected at least one published media risk record");
 assert.ok(reports.every((row) => ["published", "corroborated"].includes(row.publish_status)));
+assert.ok(reports.filter((row) => row.official_case_key).every((row) => cases.some((item) => item.case_key === row.official_case_key)), "corroborated media must point to an official case");
 assert.ok(sources.every((row) => reports.some((report) => report.media_key === row.media_key)));
 const normalized = buildRiskRows({ cases, sourceDocuments, documents, evidence, reports, sources });
 assert.equal(normalized.length, cases.length + reports.filter((report) => !report.official_case_key).length);
