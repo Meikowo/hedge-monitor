@@ -1,16 +1,24 @@
+import json
 import re
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.fetch_risk_documents import (
+    SOURCE_ITERATORS,
+    collect_requested_sources,
     deduplicate_documents,
     persist_documents,
     prepare_document,
+    resolve_sources,
     sanitize_company_codes,
 )
 from scripts.risk_relevance import assess_relevance
 from scripts.risk_sources.sse import normalize_document, unwrap_jsonp
 from scripts.risk_sources.sse import iter_documents
+from scripts.risk_sources.szse import iter_documents as iter_szse_documents
+from scripts.risk_sources.szse import parse_page as parse_szse_page
+from scripts.risk_sources.szse import parse_payload as parse_szse_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -145,6 +153,151 @@ class SseRiskSourceTest(unittest.TestCase):
         self.assertEqual(session.calls, 2)
 
 
+class SzseRiskSourceTest(unittest.TestCase):
+    def _page(self, rows, page_count=2):
+        return (
+            '<table class="table"><tbody>'
+            + "".join(rows)
+            + '</tbody></table><div>\u5f53\u524d\u7b2c 1 \u9875&nbsp;&nbsp; \u5171 '
+            + str(page_count)
+            + ' \u9875</div>'
+        )
+
+    def _row(self, code="001259", name="Example Co", date="2026-05-21",
+             category="Annual report inquiry", doc_id="ABC123"):
+        return (
+            f'<tr><td>{code}</td><td>{name}</td><td>{date}</td>'
+            f'<td>{category}</td><td><a href="javascript:void(0)" '
+            f'encode-open="/UpFiles/zqjghj/sup_jghj_{doc_id}.pdf">details</a></td>'
+            '<td>&nbsp;</td></tr>'
+        )
+
+    def test_parse_szse_inquiry_page(self):
+        rows, page_count = parse_szse_page(
+            self._page([self._row(doc_id="00019E952CF97E3FE2E01CA2FD75F43F")], 370),
+            "inquiry",
+        )
+
+        self.assertEqual(page_count, 370)
+        self.assertEqual(
+            rows[0]["source_doc_id"],
+            "szse:sup_jghj_00019E952CF97E3FE2E01CA2FD75F43F",
+        )
+        self.assertEqual(rows[0]["code"], "001259")
+        self.assertEqual(rows[0]["publish_date"], "2026-05-21")
+        self.assertEqual(rows[0]["source_type"], "inquiry")
+        self.assertEqual(
+            rows[0]["document_url"],
+            "https://reportdocs.static.szse.cn/UpFiles/zqjghj/"
+            "sup_jghj_00019E952CF97E3FE2E01CA2FD75F43F.pdf",
+        )
+
+    def test_parse_supports_measure_and_disciplinary_rows(self):
+        for source_type in ("regulatory_measure", "disciplinary_action"):
+            with self.subTest(source_type=source_type):
+                rows, _ = parse_szse_page(
+                    self._page([self._row(category="Official action", doc_id=source_type)]),
+                    source_type,
+                )
+                self.assertEqual(rows[0]["source_type"], source_type)
+                self.assertEqual(rows[0]["source_org"], "SZSE")
+
+    def test_parse_skips_missing_links_invalid_rows_and_duplicate_ids(self):
+        missing_link = (
+            '<tr><td>000001</td><td>Missing</td><td>2026-05-20</td>'
+            '<td>Inquiry</td><td>no document</td><td></td></tr>'
+        )
+        rows, _ = parse_szse_page(
+            self._page([
+                missing_link,
+                self._row(doc_id="DUPLICATE"),
+                self._row(code="000002", doc_id="DUPLICATE"),
+                self._row(code="bad", doc_id="INVALID"),
+            ]),
+            "inquiry",
+        )
+        self.assertEqual([row["source_doc_id"] for row in rows], ["szse:sup_jghj_DUPLICATE"])
+
+    def test_parse_empty_page_returns_no_documents(self):
+        rows, page_count = parse_szse_page(self._page([], 1), "inquiry")
+        self.assertEqual(rows, [])
+        self.assertEqual(page_count, 1)
+
+    def test_parse_official_api_payload_for_all_source_types(self):
+        fixtures = {
+            "inquiry": {
+                "gsdm": "001259", "gsjc": "Example Inquiry", "fhrq": "2026-05-21",
+                "hjlb": "Annual report inquiry",
+                "ck": "<a encode-open='/UpFiles/zqjghj/sup_jghj_INQUIRY.pdf'>detail</a>",
+            },
+            "regulatory_measure": {
+                "gkxx_gsdm": "000528", "gkxx_gsjc": "Example Measure",
+                "gkxx_gdrq": "2026-08-07", "gkxx_jgcs": "Regulatory letter",
+                "hjnr": "<a encode-open='/UpFiles/zqjghj/sup_jghj_MEASURE.pdf'>detail</a>",
+                "gkxx_sjdx": "Listed company",
+            },
+            "disciplinary_action": {
+                "xx_gsdm": "300716", "jc_gsjc": "Example Discipline",
+                "xx_fwrq": "2026-08-09", "xx_cflb": "Public criticism",
+                "xx_bt": "Disciplinary decision title",
+                "ck": "<a encode-open='/UpFiles/zqjghj/sup_jghj_DISCIPLINE.pdf'>detail</a>",
+            },
+        }
+        for source_type, data in fixtures.items():
+            with self.subTest(source_type=source_type):
+                rows, page_count = parse_szse_payload([{
+                    "metadata": {"pagecount": 12},
+                    "data": [data],
+                }], source_type)
+                self.assertEqual(page_count, 12)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["source_org"], "SZSE")
+                self.assertEqual(rows[0]["source_type"], source_type)
+                self.assertTrue(rows[0]["document_url"].startswith("https://reportdocs.static.szse.cn/"))
+
+    def test_iter_documents_paginates_and_stops_after_older_page(self):
+        class Response:
+            def __init__(self, data):
+                self.content = json.dumps(data).encode("utf-8")
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def __init__(self, pages):
+                self.headers = {}
+                self.pages = pages
+                self.urls = []
+
+            def get(self, url, **_kwargs):
+                self.urls.append((url, _kwargs.get("params")))
+                return Response(self.pages[len(self.urls) - 1])
+
+        session = Session([
+            [{"metadata": {"pagecount": 3}, "data": [{
+                "gsdm": "001259", "gsjc": "New Co", "fhrq": "2026-08-01",
+                "hjlb": "Inquiry", "ck": "<a encode-open='/UpFiles/zqjghj/sup_jghj_NEW.pdf'>detail</a>",
+            }]}],
+            [{"metadata": {"pagecount": 3}, "data": [{
+                "gsdm": "001259", "gsjc": "Old Co", "fhrq": "2025-12-31",
+                "hjlb": "Inquiry", "ck": "<a encode-open='/UpFiles/zqjghj/sup_jghj_OLD.pdf'>detail</a>",
+            }]}],
+        ])
+        rows = list(iter_szse_documents(
+            source_type="inquiry",
+            start_date="2026-01-01",
+            end_date="2026-08-11",
+            max_pages=3,
+            pause_seconds=0,
+            session=session,
+        ))
+
+        self.assertEqual([row["source_doc_id"] for row in rows], ["szse:sup_jghj_NEW"])
+        self.assertEqual(session.urls[0][1]["PAGENO"], 1)
+        self.assertEqual(session.urls[1][1]["PAGENO"], 2)
+        self.assertEqual(len(session.urls), 2)
+
+
 class RiskRelevanceGateTest(unittest.TestCase):
     def test_direct_derivative_risk_cooccurrence_is_candidate(self):
         result = assess_relevance(
@@ -241,6 +394,72 @@ class RiskDocumentIngestionTest(unittest.TestCase):
         self.assertIn("未经授权", prepared["raw_metadata"]["gate_excerpt"])
         self.assertTrue(prepared["raw_metadata"]["rule_relevant"])
 
+    def test_fetch_failure_is_persisted_as_failed(self):
+        document = {
+            "source_doc_id": "szse:broken",
+            "source_org": "SZSE",
+            "source_type": "inquiry",
+            "official_doc_id": "broken",
+            "code": "000001",
+            "company_name": "Example Co",
+            "title": "Example inquiry",
+            "publish_date": "2026-08-01",
+            "document_url": "https://reportdocs.static.szse.cn/UpFiles/broken.pdf",
+            "document_format": "pdf",
+            "raw_metadata": {},
+        }
+
+        prepared = prepare_document(
+            document,
+            fetched=False,
+            fetch_note="document fetch failed: Timeout",
+        )
+
+        self.assertEqual(prepared["status"], "failed")
+
+    def test_source_registry_supports_sse_szse_and_all(self):
+        self.assertEqual(resolve_sources("sse"), ["sse"])
+        self.assertEqual(resolve_sources("szse"), ["szse"])
+        self.assertEqual(resolve_sources("all"), ["sse", "szse"])
+
+    def test_one_source_failure_keeps_other_source_results(self):
+        def failing_iterator(**_kwargs):
+            raise RuntimeError("SSE unavailable")
+
+        def working_iterator(**_kwargs):
+            yield {
+                "source_doc_id": "szse:ok",
+                "source_org": "SZSE",
+                "source_type": "inquiry",
+                "official_doc_id": "ok",
+                "code": "000001",
+                "company_name": "Example Co",
+                "title": "Example inquiry",
+                "publish_date": "2026-08-01",
+                "document_url": "https://reportdocs.static.szse.cn/UpFiles/ok.pdf",
+                "document_format": "pdf",
+                "raw_metadata": {},
+            }
+
+        with patch.dict(
+            SOURCE_ITERATORS,
+            {"sse": failing_iterator, "szse": working_iterator},
+            clear=True,
+        ):
+            results, errors = collect_requested_sources(
+                sources=["sse", "szse"],
+                requested_kind="inquiry",
+                start_date="2026-07-01",
+                end_date="2026-08-11",
+                max_pages=1,
+                limit=10,
+                fetch_body=False,
+            )
+
+        self.assertEqual([row["source_doc_id"] for row in results["szse"]], ["szse:ok"])
+        self.assertEqual(results["sse"], [])
+        self.assertEqual(errors, [{"source": "sse", "error": "RuntimeError: SSE unavailable"}])
+
     def test_deduplicate_documents_keeps_one_row_per_source_id(self):
         rows = [
             {"source_doc_id": "sse:1", "title": "old"},
@@ -279,19 +498,25 @@ class RiskDocumentIngestionTest(unittest.TestCase):
 
 
 class RiskWorkflowContractTest(unittest.TestCase):
-    def test_manual_poc_workflow_defaults_to_dry_run_and_guards_write(self):
+    def test_official_source_workflow_schedules_all_sources_and_guards_manual_write(self):
         workflow = ROOT / ".github" / "workflows" / "risk-poc.yml"
         self.assertTrue(workflow.exists(), "M6a risk POC workflow is missing")
         text = workflow.read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", text)
+        self.assertIn("cron: '10 2 * * *'", text)
+        self.assertIn("options:\n          - all\n          - sse\n          - szse", text)
         self.assertIn("default: 'false'", text)
         self.assertIn("confirm_write", text)
         self.assertIn("I_UNDERSTAND", text)
         self.assertIn("group: risk-sources", text)
         self.assertIn("python scripts/fetch_risk_documents.py", text)
         self.assertIn("default: ''", text)
-        self.assertIn("--source sse", text)
-        self.assertNotRegex(text, r"(?m)^\s*schedule:")
+        self.assertIn('--source "$SOURCE"', text)
+        self.assertIn('SOURCE="all"', text)
+        self.assertIn('WRITE="true"', text)
+        self.assertIn('FETCH_BODY="true"', text)
+        self.assertIn("d.timedelta(days=29)", text)
+        self.assertIn("risk_documents_*.csv", text)
 
     def test_official_case_workflow_is_scheduled_and_write_guarded(self):
         workflow = ROOT / ".github" / "workflows" / "risk-official.yml"

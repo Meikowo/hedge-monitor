@@ -134,6 +134,32 @@ class OfficialRiskMappingTest(unittest.TestCase):
         selected = select_publishable(rows, limit=3)
         self.assertEqual([row["ann_id"] for row in selected], ["3", "2", "1"])
 
+    def test_selects_unpublished_candidates_before_applying_limit(self):
+        rows = [
+            candidate_row(ann_id="1", ann_date="2024-03-07", code="300702"),
+            candidate_row(ann_id="2", ann_date="2025-10-31", code="688529"),
+            candidate_row(ann_id="3", ann_date="2025-12-25"),
+            candidate_row(ann_id="4", ann_date="2023-08-22", code="603055"),
+            candidate_row(ann_id="5", ann_date="2021-08-25", code="000612"),
+        ]
+
+        selected = select_publishable(
+            rows,
+            limit=2,
+            existing_source_doc_ids={"cninfo:1", "cninfo:2", "cninfo:3"},
+        )
+
+        self.assertEqual([row["ann_id"] for row in selected], ["4", "5"])
+
+    def test_empty_unpublished_batch_is_a_normal_noop(self):
+        selected = select_publishable(
+            [candidate_row(ann_id="3")],
+            limit=3,
+            existing_source_doc_ids={"cninfo:3"},
+        )
+
+        self.assertEqual(selected, [])
+
 
 class OfficialRiskPersistenceTest(unittest.TestCase):
     def test_persistence_is_idempotent_and_links_matching_media(self):

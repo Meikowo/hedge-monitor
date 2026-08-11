@@ -1,35 +1,47 @@
-name: Risk Cases POC (SSE)
+name: Collect Official Risk Sources
 
 on:
+  schedule:
+    - cron: '10 2 * * *'
   workflow_dispatch:
     inputs:
+      source:
+        description: 'Official exchange source'
+        required: true
+        type: choice
+        options:
+          - all
+          - sse
+          - szse
+        default: all
       kind:
-        description: '监管来源类型'
+        description: 'Supervision document type'
         required: true
         type: choice
         options:
           - all
           - inquiry
           - regulatory_measure
+          - disciplinary_action
         default: all
       start_date:
-        description: '起始日期 YYYY-MM-DD'
+        description: 'Start date YYYY-MM-DD'
         required: true
         default: '2024-01-01'
       end_date:
-        description: '结束日期 YYYY-MM-DD（留空=运行当天）'
+        description: 'End date YYYY-MM-DD (blank means today)'
         required: false
         default: ''
       max_pages:
-        description: '每类来源最多页数（每页100条）'
+        description: 'Maximum pages per document type'
         required: true
         default: '5'
       limit:
-        description: '本次最多处理文档数'
+        description: 'Maximum documents per source'
         required: true
         default: '500'
       fetch_body:
-        description: '读取正文后再筛选'
+        description: 'Fetch and classify document bodies'
         required: true
         type: choice
         options:
@@ -37,7 +49,7 @@ on:
           - 'false'
         default: 'true'
       write:
-        description: '写入 Supabase（默认仅生成快照）'
+        description: 'Write candidates to Supabase'
         required: true
         type: choice
         options:
@@ -45,7 +57,7 @@ on:
           - 'true'
         default: 'false'
       confirm_write:
-        description: 'write=true 时必须填写 I_UNDERSTAND'
+        description: 'When write=true, enter I_UNDERSTAND'
         required: false
         default: ''
 
@@ -63,7 +75,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - name: Validate write confirmation
+      - name: Validate manual write confirmation
+        if: github.event_name == 'workflow_dispatch'
         env:
           WRITE: ${{ github.event.inputs.write }}
           CONFIRM_WRITE: ${{ github.event.inputs.confirm_write }}
@@ -76,6 +89,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          SOURCE: ${{ github.event.inputs.source }}
           KIND: ${{ github.event.inputs.kind }}
           START_DATE: ${{ github.event.inputs.start_date }}
           END_DATE: ${{ github.event.inputs.end_date }}
@@ -84,8 +99,19 @@ jobs:
           FETCH_BODY: ${{ github.event.inputs.fetch_body }}
           WRITE: ${{ github.event.inputs.write }}
         run: |
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            SOURCE="all"
+            KIND="all"
+            START_DATE="$(python -c 'import datetime as d; print((d.date.today()-d.timedelta(days=29)).isoformat())')"
+            END_DATE="$(python -c 'import datetime as d; print(d.date.today().isoformat())')"
+            MAX_PAGES="20"
+            LIMIT="1000"
+            FETCH_BODY="true"
+            WRITE="true"
+          fi
+
           args=(
-            --source sse
+            --source "$SOURCE"
             --kind "$KIND"
             --start-date "$START_DATE"
             --max-pages "$MAX_PAGES"
@@ -104,7 +130,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: risk-poc-${{ github.run_id }}
-          path: output/risk_documents_sse_*.csv
+          name: risk-sources-${{ github.run_id }}
+          path: output/risk_documents_*.csv
           if-no-files-found: ignore
           retention-days: 30

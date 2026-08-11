@@ -3,9 +3,30 @@ import assert from "node:assert/strict";
 const {
   buildRiskRows,
   filterRiskRows,
+  loadPayload,
   riskRowsToCsv,
   summarizeRiskRows,
 } = await import("../web/risk.js");
+
+const apiCalls = [];
+globalThis.window = {
+  HedgeShell: {
+    apiAll: async (table, params) => {
+      apiCalls.push({ table, params });
+      return [];
+    },
+  },
+};
+await loadPayload();
+delete globalThis.window;
+assert.deepEqual(
+  apiCalls.find((call) => call.table === "risk_source_documents")?.params,
+  {
+    select: "source_doc_id,source_org,source_type,title,publish_date,document_url",
+    status: "eq.extracted",
+    order: "publish_date.desc.nullslast,source_doc_id.asc",
+  },
+);
 
 const officialPayload = {
   cases: [{

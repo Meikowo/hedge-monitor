@@ -11,10 +11,30 @@ from typing import Any, Iterable
 
 try:
     from scripts.risk_relevance import assess_relevance
-    from scripts.risk_sources.sse import iter_documents
+    from scripts.risk_sources.sse import iter_documents as sse_iter_documents
+    from scripts.risk_sources.szse import iter_documents as szse_iter_documents
 except ModuleNotFoundError:  # direct execution: python scripts/fetch_risk_documents.py
     from risk_relevance import assess_relevance
-    from risk_sources.sse import iter_documents
+    from risk_sources.sse import iter_documents as sse_iter_documents
+    from risk_sources.szse import iter_documents as szse_iter_documents
+
+
+SOURCE_ITERATORS = {
+    "sse": sse_iter_documents,
+    "szse": szse_iter_documents,
+}
+SOURCE_TYPES = {
+    "sse": ("inquiry", "regulatory_measure"),
+    "szse": ("inquiry", "regulatory_measure", "disciplinary_action"),
+}
+
+
+def resolve_sources(source: str) -> list[str]:
+    if source == "all":
+        return ["sse", "szse"]
+    if source not in SOURCE_ITERATORS:
+        raise ValueError(f"Unsupported risk source: {source}")
+    return [source]
 
 
 def prepare_document(
@@ -48,9 +68,13 @@ def prepare_document(
         "matched_derivative_terms": list(assessment.matched_derivative_terms),
         "matched_risk_terms": list(assessment.matched_risk_terms),
         "status": (
-            "candidate"
-            if assessment.candidate
-            else ("irrelevant" if fetched else "discovered")
+            "failed"
+            if fetch_note and not fetched
+            else (
+                "candidate"
+                if assessment.candidate
+                else ("irrelevant" if fetched else "discovered")
+            )
         ),
         "note": fetch_note or assessment.reason,
         "text_chars": len(text) if fetched else None,
@@ -117,11 +141,16 @@ def fetch_document_text(
     import requests
 
     client = session or requests.Session()
+    referer = (
+        "https://www.szse.cn/"
+        if document.get("source_org") == "SZSE"
+        else "https://www.sse.com.cn/"
+    )
     response = client.get(
         document["document_url"],
         headers={
             "User-Agent": "Mozilla/5.0 hedge-monitor research",
-            "Referer": "https://www.sse.com.cn/",
+            "Referer": referer,
         },
         timeout=45,
     )
@@ -141,8 +170,9 @@ def fetch_document_text(
     return _html_to_text(content, response.encoding)
 
 
-def collect_sse_documents(
+def collect_source_documents(
     *,
+    source: str,
     source_types: list[str],
     start_date: str,
     end_date: str,
@@ -150,9 +180,12 @@ def collect_sse_documents(
     limit: int,
     fetch_body: bool,
 ) -> list[dict[str, Any]]:
+    if source not in SOURCE_ITERATORS:
+        raise ValueError(f"Unsupported risk source: {source}")
+    iterator = SOURCE_ITERATORS[source]
     rows: list[dict[str, Any]] = []
     for source_type in source_types:
-        for document in iter_documents(
+        for document in iterator(
             source_type=source_type,
             start_date=start_date,
             end_date=end_date,
@@ -180,6 +213,44 @@ def collect_sse_documents(
     return deduplicate_documents(rows)
 
 
+def collect_requested_sources(
+    *,
+    sources: list[str],
+    requested_kind: str,
+    start_date: str,
+    end_date: str,
+    max_pages: int,
+    limit: int,
+    fetch_body: bool,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
+    results: dict[str, list[dict[str, Any]]] = {source: [] for source in sources}
+    errors: list[dict[str, str]] = []
+    for source in sources:
+        source_types = [
+            source_type
+            for source_type in SOURCE_TYPES[source]
+            if requested_kind == "all" or source_type == requested_kind
+        ]
+        if not source_types:
+            continue
+        try:
+            results[source] = collect_source_documents(
+                source=source,
+                source_types=source_types,
+                start_date=start_date,
+                end_date=end_date,
+                max_pages=max_pages,
+                limit=limit,
+                fetch_body=fetch_body,
+            )
+        except Exception as exc:
+            errors.append({
+                "source": source,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+    return results, errors
+
+
 def parse_args() -> argparse.Namespace:
     today = dt.date.today().isoformat()
     parser = argparse.ArgumentParser(
@@ -187,12 +258,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=("sse",),
-        default="sse",
+        choices=("sse", "szse", "all"),
+        default="all",
     )
     parser.add_argument(
         "--kind",
-        choices=("inquiry", "regulatory_measure", "all"),
+        choices=("inquiry", "regulatory_measure", "disciplinary_action", "all"),
         default="all",
     )
     parser.add_argument("--start-date", default="2024-01-01")
@@ -210,15 +281,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.source != "sse":
-        raise ValueError(f"Unsupported risk source: {args.source}")
-    source_types = (
-        ["inquiry", "regulatory_measure"]
-        if args.kind == "all"
-        else [args.kind]
-    )
-    rows = collect_sse_documents(
-        source_types=source_types,
+    sources = resolve_sources(args.source)
+    results, errors = collect_requested_sources(
+        sources=sources,
+        requested_kind=args.kind,
         start_date=args.start_date,
         end_date=args.end_date,
         max_pages=max(1, args.max_pages),
@@ -231,23 +297,36 @@ def main() -> None:
     except ModuleNotFoundError:
         from common import log, sb_select, sb_upsert, snapshot_csv
 
-    candidates = sum(row["status"] == "candidate" for row in rows)
-    log(f"SSE 官方文档 {len(rows)} 条；规则候选 {candidates} 条")
-    snapshot_csv("risk_documents_sse", rows)
-    if not args.write:
-        log("dry-run：未写入 Supabase")
-        return
+    for source, rows in results.items():
+        counts = {
+            status: sum(row["status"] == status for row in rows)
+            for status in ("discovered", "candidate", "irrelevant", "failed")
+        }
+        log(f"{source.upper()} official documents {len(rows)}; status counts {counts}")
+        snapshot_csv(f"risk_documents_{source}", rows)
 
-    known_codes = {
-        row["code"]
-        for row in sb_select(
-            "companies",
-            {"select": "code"},
-            paginate=True,
+    if not args.write:
+        log("dry-run: Supabase was not modified")
+    else:
+        known_codes = {
+            row["code"]
+            for row in sb_select(
+                "companies",
+                {"select": "code"},
+                paginate=True,
+            )
+        }
+        for source, rows in results.items():
+            if not rows:
+                continue
+            count = persist_documents(rows, known_codes, sb_upsert)
+            log(f"{source.upper()} wrote {count} risk_source_documents rows")
+
+    if errors:
+        summary = "; ".join(
+            f"{item['source']}: {item['error']}" for item in errors
         )
-    }
-    count = persist_documents(rows, known_codes, sb_upsert)
-    log(f"已幂等写入 risk_source_documents：{count} 条")
+        raise RuntimeError(f"One or more official sources failed: {summary}")
 
 
 if __name__ == "__main__":

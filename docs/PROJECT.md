@@ -1,4 +1,4 @@
-# PROJECT.md —— 套保监控（hedge-monitor）项目上下文主文件 v2.10
+# PROJECT.md —— 套保监控（hedge-monitor）项目上下文主文件 v2.11
 
 > 用途：每次与 Claude 开新会话时上传本文件（或放入 Claude Project 知识库）。
 > 由你维护；每次会话结束让 Claude 输出更新段落，你替换后 commit。
@@ -188,497 +188,33 @@ companies(维表)   announcements(公告层)
 - `build_events.py` previously used the same `|p` suffix for every unmatched progress event under the same company/year/scope, allowing duplicate `event_key` values inside one rebuild batch.
 - Unmatched progress keys now append the stable source `ann_id`; a pre-write duplicate-key guard was also added.
 - The reported `PostgREST 409 / 23505` occurred after LLM extraction completed, during derived event rebuilding; no new LLM extraction is required for the already completed batch.
-- Added a manual `Build Events` workflow so derived-event rebuilds can be retried without invoking the LLM extraction step again.
-
-## 16. R1 recovery checkpoint after PR #11 (2026-07-18)
-
-- Current queue: 1,067 extracted, 2,378 pending, 85 failed, 1 irrelevant, and 1 skipped announcement.
-- The source layers remain intact: 1,068 extraction rows and 1,516 quota items.
-- `hedge_events` and `event_members` are both empty because the failed full rebuild cleared the derived layer before the duplicate-key insert failed.
-- Immediate recovery: run the new `Build Events` workflow on `main`, verify the derived counts, then resume 300-row extraction batches with `retry_failed=false`.
-
-## 17. R1 event rebuild verified (2026-07-18)
-
-- The standalone `Build Events` workflow completed successfully after the deterministic key fix.
-- Verified state: 543 events, 1,067 event members, 350 multi-announcement events, zero orphan members, and zero hedge-related extractions without an event membership.
-- Resume `Extract Batch (LLM)` with `limit=300`, blank date, and `retry_failed=false`; handle the 85 failed rows only after pending reaches zero.
-
-## 18. R1 closed and M3 formal frontend v1 (2026-07-19)
-
-- R1 queue is closed: 3,516 extracted, 5 irrelevant, 11 skipped, 0 pending, and 0 failed announcements.
-- Derived layer rebuilt successfully: 1,721 hedge events across 1,515 companies, including 1,210 multi-announcement events.
-- M3 visual direction is fixed as the shadcn-style dense workspace (A) with an on-demand research evidence drawer (C).
-- The local frontend now reads all event rows with API pagination, provides search/filter/sort/page controls, lazy-loads the announcement stream, and fetches related announcement evidence only when an event is opened.
-- Browser data access continues to use the publishable key and RLS-protected read-only views; no service-role credential is exposed. The formal v1 is pending source synchronization and Pages publication.
-
-## 19. M3 dashboard and export workspace (2026-07-19)
-
-- Replaced the non-interactive sidebar dimension labels with three real workspaces: dashboard, event research, and announcement flow.
-- Added client-side aggregates for yearly company/event coverage, industry and enterprise-nature company coverage, scope and approval event distributions, and event-field completeness.
-- Added UTF-8 CSV export for the complete current filtered result set in both event and announcement views.
-- Dashboard aggregation reuses the fully paginated `v_events` payload, so this stage adds no schema, database-write, or LLM cost.
-- GitHub Pages deployment completed successfully from commit `f4efcfef`; the public HTML, JavaScript, CSS, and UTF-8 Chinese text were verified online.
-
-## 20. R2 unattended historical extraction (2026-07-20)
-
-- 2025 backfill completed with 4,920 unique announcement candidates across all 12 months and zero duplicate artifact rows.
-- `Extract Batch (LLM)` now runs every 6 hours at Beijing 04:30/10:30/16:30/22:30 and processes at most 600 pending rows per scheduled run.
-- Empty queues skip LLM calls and event rebuilds; automatic runs never include failed rows.
-- Eight consecutive failures trip a circuit breaker, leave untouched announcements pending, and mark the workflow red for inspection.
-- Scheduled extraction shares the repository-wide `cninfo` concurrency group with daily/backfill/audit, so PDF downloads and announcement queries do not overlap.
-- The scheduled Daily Pipeline now fetches announcements only; its LLM/build steps remain available on manual dispatch and no longer compete with historical scheduled extraction.
-
-## 23. M3 frontend loading resilience hotfix (2026-07-21)
-
-- Root cause: the initial page loaded every announcement status through 9 paginated requests solely to
-  calculate one metric. Together with the 4 event pages, any request that remained pending left the
-  interface on its static loading spinner indefinitely because fetch had no timeout.
-- Replaced status enumeration with one exact `HEAD` count. This changes only the top “结构化公告” metric;
-  the announcement workspace still lazy-loads complete rows, evidence, filters, details, and CSV exports.
-- Added a 20-second request timeout, up to three attempts for transient network/429/5xx failures,
-  page-by-page loading progress, a 1,000-page safety guard, and global initialization error reporting.
-- Removed unused API fields and versioned HTML asset URLs to prevent mixed old/new HTML and JavaScript
-  from browser or Pages cache.
-- Real public-API bootstrap test passed in 5.4 seconds with 3,281 events and 6,763 extracted announcements.
-
-## 24. 衍生品风险案例库设计检查点（2026-07-25）
-
-- 产品边界：只收录与上市公司期货、期权、远期、掉期、互换、衍生品或套期保值业务
-  直接相关的问询、监管措施、处罚、重大损失和权威历史案例；不做一般负面新闻库。
-- 产品形态：独立风险案例库，共享 `companies`，但不混入公告事件或定期报告事实表。
-- 数据来源：交易所问询/监管/纪律处分、证监会及派出机构处罚/监管措施、上市公司相关
-  公告及可回溯到权威原始材料的历史事件。
-- 首版必须自动化：官方来源发现 → 关键词召回 → 衍生品相关性闸门 → LLM 结构化抽取
-  → 原文证据回验 → 幂等入库。人工仅做抽样验收；手工补充/纠错接口列为后期可选。
-- 开发时序：M6a 数据管线可与 M4a 年报 POC 同步推进。两者使用独立迁移、脚本、
-  workflow 和测试；迁移编号、公司维表、模型额度统一协调；同一前端模块不并行修改。
-- 当前状态：需求与架构已写入 PRD v1.4；尚未创建风险案例数据库迁移、采集脚本、
-  Actions 工作流或前端入口。
-
-## 25. M4 定期报告口径与前端架构检查点（2026-07-25）
-
-- 定期报告采用「报告级摘要 + 业务级明细」，不把套期会计等随期变化的事实写入
-  `companies`，也不修改现有公告事件数据契约。
-- 套期会计报告级状态固定为：已应用、未应用、混合应用、未明确披露、需复核；
-  业务级明细记录类别、工具、方法、未应用原因、页码、原文和回验状态。
-
-## 26. M4 正式前端 v0.1 与 40 份报告检查点（2026-07-29）
-
-- 已抽取 40 份 2025FY 报告，形成 40 个报告级业务画像和 265 条数值事实；正式前端
-  仅展示数值与引文均已回验的事实，当前未回验事实为 0，精确重复组为 0。
-- 生产站新增独立“计划与实际”工作区，按公司×报告×业务范围拆行，支持搜索、年份、
-  商品/外汇/利率、套期会计与证据状态筛选，并提供右侧证据详情和 PDF 原文入口。
-- 期末衍生金融资产、期末衍生金融负债、期末公允价值净额分别展示；净额仅在同口径
-  资产/负债同时可得时勾稽计算，不把报告级损益强行分摊到商品或外汇业务。
-- 修复显式多报告提取被默认 `limit=1` 截断、跨页衍生品表头和单位丢失、利率掉期被误分为
-  外汇、正文“实际产生损益”换行后漏提四类通用问题，并增加回归测试。
-- 珠海港跨页表补回 7 条事实；广宇集团依据年报原文改为“已应用现金流量套期”；
-  *ST生物仍保留一项会计政策与业务表述口径的人工判断。
-- 本阶段为 **M4 正式前端 v0.1**。达到 120 家优先样本、完成分层人工抽检并稳定筛选/
-  导出后升级为 M4 v1.0；公告计划与实际值的自动口径判定属于 M5，当前只显示候选关联。
-- 正式前端已由提交 `1962304b` 发布，Pages 工作流成功；如需整体撤回本次发布，
-  以发布前 `main` 提交 `9cf4a726` 为回退基线，禁止强推，使用反向提交恢复。
-- 晶科能源 2025 年报样本确认未应用套期会计，方法为空，原文未披露未应用原因；
-  不得推断其未应用原因。
-- 模糊的 `period_pnl` 口径必须拆分：公司披露衍生品综合损益（可能含浮动）、
-  处置衍生金融工具投资收益、公允价值变动损益分别记录；衍生金融资产、负债和净额
-  也分别记录。
-- 定期报告新增期末保证金事实，记录金额、报告日、列示科目、受限状态、业务范围、
-  对手方和证据；公告“保证金最高占用额”与年末保证金余额只做 B 级期末快照核验。
-- 「计划与实际」主表将期末保证金、公允价值资产、公允价值负债和公允价值净额拆为
-  四列。报告级资产/负债合计不得复制为分类事实参与汇总。
-- 晶科样本两组勾稽成立：处置投资收益 + 公允价值变动损益 = 综合损益；
-  衍生金融资产 - 衍生金融负债 = 期末净账面价值。
-- M4 表格解析下一门槛是保留单元格坐标、修正购入/售出列错位并完成数字、引文、
-  勾稽三重验证；未通过的数值不能进入图表或 M5。
-- 前端将在左侧新增独立「计划与实际」工作区，采用高密度主表 + 右侧证据详情；
-  套期会计作为其中的核心维度，不单独设顶级入口。现有「套保事件」和「公告原流」
-  保持不变。
-- 先在 `web-demo/periodic-actuals/` 制作固定样例的独立本地 Demo；用户确认后才接入
-  Supabase 和正式 `web/`。设计基准见
-   `docs/superpowers/specs/2026-07-25-periodic-actuals-workspace-design.md`。
-
-## 26. M4 v1.5 契约与六份验证批次（2026-07-26）
-
-- Supabase 已应用 `m4a_periodic_v15_contract`：报告级套期会计字段、事实层级与上下文字段、
-  新损益/保证金/资产负债类型，以及业务级 `periodic_hedge_accounting_items` 均已上线；
-  RLS、显式授权和 Security Advisor 已验收。
-- 安全默认样本改为 6 家验证集；30 家仍保留为下一道 POC 闸门，不自动扩量。
-- 定位器升级至 `v2.2`：分别保留业务、套期会计、投资收益、公允价值变动损益、OCI、
-  衍生金融资产、负债、保证金和公司专属品种页，并确保 15 个候选页都实际进入模型正文。
-- 年报抽取升级为 `periodic-v2.1-multipass` 四段短输出；修复 `LLM_THINKING=off`
-  未显式发送 disabled、长 JSON 截断重复重试、横线误判为 0、损失/会计括号负号回验问题。
-- 六份验证集均已完成流程。中集 22 条数值中 11 条双回验，格力 7/7，株冶 0/9，
-  晶科旧契约 3/18；大北农与博彦当前无可靠数值。流程闸门通过，但表格质量闸门未通过。
-- 下一步不扩到 30 份：先逐份人工核验 6 家，重点修复中集/株冶表格单元格与引文对齐、
-  晶科旧契约迁移，以及大北农/博彦的无数值判定。
-
-## 27. M4 年报证据规则 v2.2（2026-07-26）
-
-- 年报取证改为程序可独立下载并渲染指定页面；人工截图仅用于下载受限、OCR 失败或
-  阅读器页码偏移等例外情况。
-- 提示词升级为 `periodic-v2.2-evidence`，明确覆盖“报告期实际损益情况”中的平仓与
-  持仓损益，并禁止将千元、万元、亿元、万美元、亿美元换算成基础单位。
-- 新增确定性损益句式兜底；株冶 P30 商品衍生品损益 `-366,065,852.86 元` 已双回验入库。
-- 株冶 P31 已区分最高保证金 `5.45亿元`、商品最高合约价值 `32.70亿元` 和外汇最高
-  合约价值 `1.7亿美元`，纠正了单位换算及保证金/名义本金错分。
-- 新增零值单位约束，删除中集 P48 由 `0.00%` 错配出的 3 条金额零；“千元”并非
-  中集引文未通过的原因，复杂表格仍需单元格坐标对齐。
-- 选择性短批次空结果不再删除旧事实，防止模型偶发空响应造成数据回退。
-
-## 28. M4 六份样本质量闸门通过（2026-07-27）
-
-- 定位器升级至 `v2.3`，抽取契约升级至 `periodic-v2.3-tablecells`。
-- 标准衍生品表按单元格坐标和表头读取；同页多表分别识别单位，跨页公允价值表可延续
-  表头；合并口径自动排除母公司财务报表项目注释。
-- 未通过数值与引文双回验的事实不入库；完整重跑清理旧 `period_pnl`，避免新旧口径并存。
-- 会计政策和业务表不再作为实际应用套期会计的充分证据；空白“现金流量套期储备”模板
-  不得误判为当期应用。
-- 六份样本最终 71 条数值事实，71 条全部双回验：中集 18、格力 14、大北农 10、
-  博彦 0、株冶 12、晶科 17；30 份审计时删除株冶 1 条同页同语义重复事实。
-- 套期会计结论：格力已应用现金流量套期；大北农、株冶、晶科未应用；博彦当期无
-  衍生品投资；中集只披露政策，保守记录为未明确披露。
-- 六份样本质量闸门通过。下一步进入 30 份 POC，仍以小批量运行、失败率/耗时记录和
-  异常版式复核为边界，不直接扩至全上市公司历史年报。
-
-## 29. M4 三十份年报 POC 完成（2026-07-27）
-
-- 30/30 份 2025FY 年报完成定位和抽取；其余 24 份按 4 个六份批次执行，无 OCR、
-  下载或定位失败。
-- 数据库现有 198 条定期报告数值事实，198 条全部完成数字与引文双回验；未回验事实、
-  完全重复组和披露状态待复核均为 0。
-- 披露分布为：23 份有数值、6 份明确提及但无数值、1 份未提及；套期会计业务明细
-  22 条，待复核及引文未回验均为 0。
-- 补齐多行稀疏表头、财务附注续表投资收益、明确衍生品附注纠正披露状态、同页语义
-  去重等规则；排除普通交易性金融资产收益和通用会计政策误入。
-- 中稀有色与航民股份候选页已由程序自行渲染核查；博彦“无数值”和大北农数值/未应用
-  原因均已确认。本轮不要求用户逐份检查 30 份；下一步生成少量分层人工验收包，
-  通过后冻结 v2.3 规则并决定扩量。
-
-## 30. M4 人工验收与 120 家优先池（2026-07-28）
-
-- 人工验收辉隆股份、生益科技、航民股份、中稀有色、博彦科技五份边界样本：
-  辉隆确认未应用套期会计；生益的 `-9,950,713.48 元` 改列衍生品处置损益；
-  航民排除黄金租赁保证金，并纳入黄金/白银 T+D 投资收益但保留“套保目的未明确”；
-  中稀有色改为“提及无数值”，普通交易性金融资产及缺少实际套保证据的衍生工具损益
-  不作为套保实际损益；博彦确认报告期无衍生品投资，通用政策不代表实际应用。
-- 数据库校正后仍为 30 份报告、197 条数值事实，197 条数字与引文全部回验；
-  五份人工样本 `review_status=accepted`。后续抽取默认跳过 accepted 金标准，只有显式
-  `--force-reviewed` 才允许覆盖。
-- 提示词升级为 `periodic-v2.4-reviewed-boundaries`：黄金租赁/融资担保保证金不得作为
-  衍生品保证金，T+D 明确衍生交易可纳入但不得擅自认定套保目的；只有衍生金融工具
-  附注、没有实际套保业务上下文时，披露状态进入复核而非自动判为有套保数值。
-- 扩量池设为 120 家，商品、外汇、商品+外汇各 40 家，并强制包含原 30 家金标准。
-  选择器新增公司主表外键校验；元数据采集支持“2025年年度报告/2025年度报告”两种
-  标题，并在同公司同期存在原版和修订版时只保留修订版。
-- 120/120 家已取得 2025FY 规范年报元数据；首批 10 份候选页定位成功，无 OCR 或空
-  候选页。新增样本按小批量提取和审计推进，不一次性消耗全部模型额度。
-- 扩量首批发现模型可能只返回 `<think>` 而没有正文。解析层现将“无 JSON/仅思考正文”
-  与“已开始但截断的 JSON”分开：前者最多退避重试两次，后者仍立即停止，防止同一
-  长输出重复消耗。
-- 优先池新增样本已完成 7 份：新增 53 条数值事实，数字/引文未回验 0、语义重复 0、
-  套期会计明细待复核 0；全库现有 37 份已抽取报告、250 条数值事实。
-- 扩量探针已修复：套期会计“适用/不适用”勾选方向反转、`百万元` 单位缺失、科目前
-  编号造成的语义重复、结构化状态与摘要冲突，以及标准衍生品表“投资收益”列漏取。
-- 中国船舶据 P214–215 确认为已应用套期会计：外汇业务为公允价值套期、商品业务为
-  现金流量套期；宝钢 P28 数值单位为百万元；东方盛虹补入商品和外汇投资收益两项。
-- 当前不直接跑完剩余优先池。先继续已定位的 3 份，再按小批次审计；人工只核验程序
-  无法消除的业务边界，不要求逐份检查全部扩量样本。
-- 2026-07-29 人工确认爱柯迪与东方盛虹：爱柯迪 P146 的 `100 元` 期货保证金保留为
-  期末事实，但不扩展报告级商品业务范围；东方盛虹报告级保持已应用套期会计，商品为
-  现金流量套期，外汇业务记为未明确披露而非混合应用。两份均已标记为 `accepted`，
-  人工接受样本累计 7 份。德创环保、天奈科技摘要已同步修正。
-
-## 31. M4 正式前端 v0.2 与 2025 年扩量口径（2026-07-29）
-
-- “计划与实际”新增“导出当前结果”：导出完整的当前搜索和筛选结果，不受屏幕可见行
-  限制；CSV 使用 UTF-8 BOM，并保留报告、公司、地区、类别、品种、工具、公告候选、
-  交易流量、保证金、衍生金融资产/负债/净额、三类损益、套期会计、证据与 PDF 字段。
-- 主表新增保守的同口径聚合：只有指标、事实层级、类别、币种、单位和时间口径均相同，
-  且每个非空分项可由品种或列示科目明确区分时才求和；详情抽屉仍保留全部分项、页码和
-  引文。报告级多事实可能同时包含合计与分项，因此不自动相加；口径不兼容时继续显示
-  “N 项事实”，不擅自合计。
-- 锐新科技 2025FY 的数据库事实本身正确，旧前端只是没有聚合多分项。修复后商品行显示
-  购入 `3,505.10 万元`、售出 `3,558.64 万元`、公允价值变动损益 `53.54 万元`；
-  铜、铝分项仍可在证据详情查看。“综合损益”继续保持未披露，不以公允价值变动或 OCI
-  代替。
-- 2025 年当前数据库口径：公司主表 5,524 家；120 家优先池已有 121 条规范年报元数据
-  （含 1 条同公司同期版本记录），40 家已抽取，剩余约 80 家；2025 年套保事件涉及
-  1,812 家公司，可作为正式扩量第一波的上限候选，不等于最终需要调用模型的数量。
-- 按已测单份端到端约 101 秒估算，优先池剩余 80 份纯串行模型时间约 2.2 小时，计入
-  退避、重试和质量审计后预计 3–5 小时计算时间，并预留半至一个工作日完成分层抽检。
-  若对 1,812 家候选全部调用模型，纯模型时间约 51 小时，实际预计 60–80 小时；若盲目
-  对 5,524 家全量调用则约 155 小时纯模型时间，效率与成本均不合理。
-- 正式流程从现在起可按“小批量自动定位 → 仅相关报告调用模型 → 每批质量审计”启动；
-  先完成 120 家优先池作为正式质量闸门，再执行全市场确定性定位和候选收缩，不一次性
-  对全市场年报调用 LLM。
-- 前端 v0.2 已由提交 `fa475393` 非强制快进至 `main`；发布前回退基线为
-  `57089bf2`。线上资源版本为 `v=20260729-2`，计划与实际 52 行及锐新科技三项合计
-  已验收。
-
-## 32. M4 年报安全自动批处理（2026-07-29）
-
-- 120 家优先池改为每 6 小时自动推进：北京时间 `00:45、06:45、12:45、18:45`
-  启动，每轮先定位最多 12 份，再抽取最多 6 份。
-- 自动查询硬过滤 `fiscal_year=2025` 和 `report_type=annual`，不会在本轮完成后误处理
-  同公司其他年度或半年报。
-- 定时任务固定使用 `config/annual_priority_2025.csv`，继续与公告任务共用 `cninfo`
-  并发锁；不取消正在运行的任务。若多个任务同时等待，GitHub 可能只保留最近一个
-  pending，下一定时周期会继续补处理。
-- 定位器默认只处理 `discovered`。下载、模型、解析或写库异常的报告标记为 `failed`，
-  当前批次失败停止，后续定时任务自动跳过，避免同一异常报告循环消耗 Token。
-- 定位下载和完整抽取都会在实质工作前持久化领取报告；即使 runner 被强制终止或超时，
-  报告也保持 `failed`，不会在下一轮再次自动计费。前端只把 `extracted` 报告构建为
-  展示行，中断产生的部分写入不会展示，人工恢复时按既有替换规则重建。
-- 高级 CLI 的选择性 `--pass` 重跑同样先隐藏报告，成功后恢复其原状态；硬终止时停留
-  在 `failed`。失败快照与隔离说明分别尽力写入，不会相互遮蔽原始异常。
-- 手动 `locate` 增加 `retry_failed` 选项；只有人工核查后明确勾选，才重新定位失败报告。
-  手动 `extract` 仍需勾选 `confirm_llm`，人工接受的 `review_status=accepted` 金标准继续
-  默认保护。
-- 仓库变量 `PERIODIC_AUTO_ENABLED=false` 可暂停定时年报任务；变量不存在或值不为
-  `false` 时默认启用。优先池完成后定时任务正常空跑，不覆盖既有结果。
-- 本轮只修改工作流、年报定位/抽取状态机和测试，不修改数据库结构、RLS、公告流程或
-  前端展示。
-
-## 33. M6a 风险案例基础纵向切片（2026-07-30）
-
-- Supabase 已应用迁移 `m6a_derivative_risk_cases`，建立
-  `risk_source_documents`、`derivative_risk_cases`、`risk_case_documents`、
-  `risk_case_evidence` 四张独立表；全部启用 RLS，anon/authenticated 只读，
-  service_role 具备 16 项表级 CRUD 权限。迁移后 Security Advisor 为 0 告警。
-- 上交所官方监管信息适配器已接入公开 JSONP 接口，当前支持监管问询和监管措施两类，
-  兼容顶层 `result` 与旧式 `pageHelp.data`，强制官方 HTTPS 原文链接，并处理 UTF-8、
-  分页、重试及无原文链接记录。
-- `fetch_risk_documents.py` 默认 dry-run，可下载 PDF/HTML 正文、执行确定性相关性闸门、
-  生成带命中片段的 CSV 快照；仅显式 `--write` 时才按 `source_doc_id` 幂等 upsert。
-  未知或退市公司代码在写入前置空，避免公司主表外键阻塞官方文档留存。
-- 新增手动 `Risk Cases POC (SSE)` workflow。默认不写库；写入必须同时选择
-  `write=true` 并填写 `I_UNDERSTAND`。M6a POC 阶段暂不设定时触发，也不调用 LLM。
-- 真实 dry-run 已读取 75 份监管措施和 75 份问询函正文，下载失败 1 份。初始规则暴露
-  “证券期货市场诚信档案”、舱位互换、应收款远期结算、远期退换货、股票期权激励与
-  过渡期权益等误报；加入回归规则后，这 150 份不再误入候选。它们是来源与精度压力
-  测试，不是正式案例样本，数据库四表目前均为 0 行。
-- 完整 Python 回归 121 项通过；M6 新增契约测试 18 项，覆盖表结构、RLS/权限文本、
-  JSONP、分页、URL、候选/窗口内相关性边界、候选准备、去重、公司外键安全与
-  workflow 写入护栏。候选召回与 320 字符窗口内规则确认分开记录，正式案例仍须模型
-  与证据回验。
-- 下一切片按同一契约接入 SZSE、CSRC/派出机构来源，再扩大 2024 年至今的来源扫描，
-  形成至少 50 份真正的衍生品风险候选；随后接 LLM 风险分类、官方引文回验与人工分层
-  抽检。达到相关性精确率不低于 90% 且每个正式案例均有官方证据后，才完成 M6a 并进入
-  M6b 历史扩展、定时增量和前端。
-
-## 34. M6a Tavily 新闻风险线索 POC（2026-08-01）
-
-- 新闻搜索只承担召回，不承担事实认定；结果写入独立私有表 `risk_media_leads`，不混入
-  官方来源文档或正式风险案例四表，也不向当前前端开放。
-- Tavily 固定使用 news/basic，不请求答案、全文或图片；每次最多 12 组、每组 10 条，
-  北京时间 08:15 与 20:15 各运行一次，理论月度上限 744 credits。
-- 采集器、查询配置或媒体 workflow 变更时只运行本地契约测试，不自动消耗 Tavily credits；
-  Secret 与真实接口由手动 dry-run 验证，定时任务使用固定写库口径。
-- 线索必须在标题或同一句局部语境内同时命中衍生品词和风险词，正文还须有已发生语义；
-  “若、可能、一旦”等假设性风险提示排除。URL 规范化后按哈希幂等去重，多查询命中合并。
-  写库时按代码或最长公司全称匹配公司主表，未匹配线索保守保留为待核实。
-- `TAVILY_API_KEY` 只存在于 GitHub repo Secrets/本地 `.env`。手动运行默认 dry-run；
-  定时运行只写私有线索，不调用 MiniMax，不产生正式案例。
-
-## 35. M6a Tavily 历史新闻回填（2026-08-01）
-
-- 回填范围为 2000—2025 年，12 组查询按年份从新到旧建立 312 个年度窗口；每次最多处理
-  12 个窗口、每窗口最多 10 条。年度窗口满额自动拆四个季度，季度满额仅记录饱和状态。
-- `risk_media_backfill_windows` 保存断点、尝试次数、结果/线索数和 credit 消耗；失败最多重试
-  3 次，运行超过 3 小时可恢复。先写幂等线索再完成窗口，避免中断漏数。
-- 窗口通过数据库函数原子领取；媒体 URL 再次命中时只合并来源与命中词，不覆盖人工复核状态。
-  写库模式强制每窗口 10 条，批次内任一失败都会让 Actions 标红并保留后续重试状态。
-- 增量监测调整为每日北京时间 08:15 一次，历史回填每日 20:45 一次，两者共用
-  `risk-media-tavily` 并发锁。首轮年度回填理论 312 credits，增量理论 372 credits/月。
-- 回填只增加私有媒体候选，当前前端与正式风险案例库均不读取；后续仍需官方来源反查和证据回验。
-
-## 36. 全项目进度复核与风险案例监控前端设计（2026-08-01）
-
-- Supabase 实时复核：公司 5,524 家，公告 18,508 条，公告抽取 18,429 条，套保事件
-  8,227 个；2025—2022 年公告均已处理至无 pending，2022—2023 年仍有 7 条 failed，
-  2021 年尚未回填。
-- M4 的 120 家 2025FY 优先池现有 88 家已抽取、32 家已定位；另有 1 条旧版报告因同公司
-  同期已有更新版而跳过。数据库有 535 条数值事实，全部通过数值和引文双回验，并有
-  77 条业务级套期会计明细。最新定时批次成功处理 6 家，后续继续每 6 小时自动推进。
-- M6a 正式风险案例四表、SSE 适配器、Tavily 增量监测和 2000—2025 历史回填均已部署；
-  本次复核时正式案例、媒体线索和历史窗口仍为 0，首轮历史回填等待北京时间 20:45
-  定时启动。Supabase Security Advisor 为 0 告警。
-- 用户确认在左侧工作区增加“风险案例监控”。先制作固定样例的本地高密度表格 Demo，
-  生产页面只展示具有官方证据链的正式案例，绝不展示私有 Tavily 候选。
-- 生产入口在至少 50 份官方候选、抽检精确率不低于 90%、至少 10 个正式案例且关键字段
-  引文全部回验后开放。设计基准见
-  `docs/superpowers/specs/2026-08-01-risk-case-monitoring-workspace-design.md`。
-
-## 37. M6b-1 风险案例监控本地 Demo（2026-08-01）
-
-- 新增隔离的本地入口 `web-demo/risk-cases/index.html`，不访问生产数据库，不修改
-  `web/`，也不向线上左侧导航暴露空入口。
-- Demo 使用 6 条明确标注为虚构演示数据的正式案例形态，覆盖重大衍生品损失、保证金
-  与流动性、超授权/内控、衍生品会计与信息披露、授权不一致、偏离套保目的等边界。
-- 页面包含 5 个工作区导航、4 项紧凑指标、关键词/年份/风险类型/来源机构/案例状态筛选、
-  当前结果 CSV 导出、高密度 10 列主表，以及事件事实—监管文档链—逐字段证据右侧抽屉。
-- 纯逻辑保持独立：金额严格区分 null 与 0，保留原币种/单位；筛选条件取交集；监管文档
-  按日期排序；CSV 带 UTF-8 BOM 且不包含媒体候选层。
-- 新增结构与逻辑测试。自动浏览器因本地 `file://` URL 安全策略不能导航，本轮不虚报
-  视觉验收；结构、行为和语法自动检查完成后，由用户打开本地入口进行视觉确认。完整
-  Python 回归 143 项通过；全部前端 Node 回归通过，真实公开 API 启动读取 8,227 个事件、
-  18,348 条结构化公告，49 个前端引用节点全部解析。
-- M6a 上线闸门保持不变：至少 50 份官方候选、抽检精确率不低于 90%、至少 10 个正式
-  案例且关键字段均有已回验官方引文，才连接正式数据并开放生产入口。
-
-## 38. M6 正式案例首批召回口径（2026-08-02）
-
-- 用户已确认风险监控 Demo 的整体布局可以进入正式实施；Demo 继续与生产前端隔离，
-  达到质量闸门前不开放线上空入口。
-- 首批真实案例不限定最近五年，也不按主观标准筛选“证据最完整”的案例。只要存在直接
-  涉及上市公司已发生衍生品风险事实的官方原文，就可以进入官方候选文档层。
-- 官方来源包含交易所问询/监管措施/纪律处分、证监会及派出机构文件，以及公司在交易所
-  或法定披露渠道发布的损失公告、回复、整改和定期报告；媒体与搜索摘要仍只作私有线索。
-- 正式实施采用“官方来源直接扫描 + 媒体/已知事件反查官方原文”双通道，统一写入现有
-  官方文档契约。先完成 1—3 个真实案例的端到端纵向切片，再扩大到 50 份官方候选、
-  10 个正式案例及 90% 候选精确率的线上质量闸门。
-- 允许单份官方文件支撑首批案例，但前端展示的每个关键字段必须有可定位、可回验的官方
-  引文；官方原文未覆盖的字段必须保持“未披露”，不得由媒体报道或模型推断补齐。
-
-## 39. M6 风险监控双层公开数据口径（2026-08-02）
-
-- 用户确认缺少官方文件时，合格媒体报道也可以在公开风险工作区展示，但必须明确标注
-  “媒体报道／未核实”并保留媒体名称、日期和原文链接。
-- 原始 `risk_media_leads` 和历史窗口仍为 service_role 私有，不直接开放。新增独立公开
-  媒体投影，只发布已匹配上市公司、同一语境命中衍生品与已发生风险、具有明确 HTTPS
-  来源且不属于论坛/股吧/匿名自媒体的安全字段。
-- 前端采用统一列表、双证据层级：`官方文件／已核实` 与 `媒体报道／未核实`。正式案例数
-  和媒体线索数分别统计，CSV 导出证据级别、核实状态和来源，不把媒体线索计入正式案例。
-- 找到官方原文并形成正式案例后，列表以正式案例为主行，媒体报道转为补充来源并停止重复
-  计数；误报、撤回或来源失效的媒体记录从公开投影撤下，但保留私有审计记录。
-- 媒体公开层不降低正式案例上线闸门。50 份官方候选、10 个正式案例和不低于 90% 的官方
-  候选精确率继续独立计算。
-
-## 40. M6 媒体未核实公开层落地（2026-08-02）
-
-- 新增 `risk_media_reports` 与 `risk_media_report_sources` 两张公开投影表；原始
-  `risk_media_leads` 和 `risk_media_backfill_windows` 继续只允许 service_role 访问。
-  anon 对公开两表读取成功，对两张原始表返回 401；Supabase Security Advisor 为 0 告警。
-- 发布器只读取已存储的私有候选，不抓全文、不调用 MiniMax。它要求上市公司代码/名称、
-  日期、HTTPS URL、白名单媒体，以及同一局部语境中的衍生品词和已发生风险词；论坛、股吧、
-  匿名来源、官方域名和假设性风险提示均拒绝公开。
-- 真实首轮共检查 2 条私有候选：江特电机 2025-12-28 新浪财经报道通过并形成 1 条公开
-  媒体记录和 1 条来源记录；另一条因缺少可匹配公司而拒绝。连续执行两次后仍为 1/1，
-  幂等验证通过。该记录只标注“媒体报道／未核实”，不计入正式官方案例。
-- 增量监测与历史回填在写库模式后自动运行公开发布器；GitHub push 仅执行测试，不调用
-  Tavily，也不消耗搜索 credits。Demo 已增加双证据筛选、分层指标、媒体来源抽屉和带来源
-  字段的 CSV 导出，生产 `web/` 与线上导航没有改动。
-- 本次发布前远端回退基线为 `749797e9b43d1415efa22c10be1b48f33c778faa`。若新提交需整体
-  撤回，应从该基线创建反向提交或回退分支，不强推 `main`。
-- 发布前完整回归通过：159 项 Python 测试、风险 Demo/定期报告 Demo/生产计划与实际/
-  正式前端结构等 6 组离线 Node 测试，以及真实公开 API 启动测试；启动测试读取 8,237 个
-  事件和 18,495 条结构化公告。19 个发布文件的密钥值扫描无命中，生产 `web/` 不在范围内。
-- 下一步按独立计划完成 1—3 个真实官方案例纵向切片：媒体/已知事件反查官方原文，补齐
-  SZSE、CSRC 与 CNINFO 适配器，写入官方四表并逐字段回验引文；正式上线闸门保持不变。
-
-## 41. 公告事件额度来源回退修复（2026-08-02）
-
-- 根因不在 LLM：鹏辉能源 2026-04-29 原计划和 2026-07-09 调额公告已经正确抽取商品/
-  外汇额度，但 2026-07-24 股东会决议只写“议案通过”。旧聚合规则无条件选择最高审批
-  公告作为额度来源，因此事件快照为空，期限和额度在前端显示“未披露”。
-- 事件阶段与额度来源现已解耦：阶段仍取最高审批层级；额度优先取最高审批层级中至少包含
-  一条非空且 `amount_verified=true` 金额的最近计划公告。股东会未重列金额时回退到同事件
-  最近额度公告；全事件无可验证金额时才保留最高审批层级的纯文本额度行。
-- 修复同时把 `page` 和 `quote_verified` 写入事件额度快照，避免抽取层已回验、事件详情却
-  显示待回验。新增 3 个回归测试，分别覆盖无金额股东会回退、空金额行不得遮蔽已回验金额、
-  页码和引文回验字段保留。
-- 生产事件层已全量重建：8,237 个事件、18,495 个成员，孤儿成员 0、相关公告未挂靠 0；
-  原先 44 个“事件额度为空但成员有额度”问题降为 0，额外发现的 16 个“空金额行遮蔽已
-  回验金额”问题也降为 0。没有重新调用 LLM。
-- 鹏辉能源 2026 事件现在保持“股东大会通过”，额度来源回退到 2026-07-09 调额公告，
-  恢复 8 条额度和有效期限：商品保证金 3 亿元/合约价值 20 亿元，外汇保证金 4.5 亿元/
-  合约价值 30 亿元，综合保证金 7.5 亿元/合约价值 50 亿元。
-- 完整回归通过：162 项 Python 测试、6 组离线 Node 测试和真实公开 API 启动测试；启动
-  测试读取 8,237 个事件、18,495 条结构化公告。
-
-## 42. M4 2025 年年报正式扩量（2026-08-08）
-
-- 第一阶段正式分母固定为 `hedge_events.anchor_year=2025` 的 1,812 家公司、2,015 个事件，
-  并固化为 `config/annual_formal_2025.csv`。快照为 1,812 个唯一代码、无空代码；后续公告
-  新增不会在本阶段运行中改变分母。
-- 真实数据检查发现正式池中有 18 家 B 股公司，另有 44 家尚未进入 `companies` 主表；两类
-  公司均属于 1,812 家事件分母，不能沿用早期 POC 规则排除。元数据写入前会以正式池名称、
-  行业和企业性质补齐最小公司主表记录，满足 `periodic_reports.code` 外键，不修改表结构。
-- 正式池当前基线为：已发现 109 家、已提取 108 家、失败 1 家、待发现 1,703 家、人工接受
-  6 家。生产前端现有 119 家全部保留；其中 11 家不属于 `anchor_year=2025` 正式分母，仍可
-  展示和导出，但不计入本轮扩量进度。
-- 定时流程保持每 6 小时运行，改为“全市场 2025 年年报元数据扫描并按正式池过滤 → 定位
-  最多 48 份 → 提取最多 18 份 → 输出公司级进度”。前后进度均生成 JSON 诊断快照；初始
-  两批稳定且人工抽查无系统性问题后，才评估把提取上限提高到 24。
-- 全市场发现不是单个年度查询，而是先按自然季度分为四个窗口；任一窗口达到巨潮 300 页
-  上限且仍有后续结果时自动按日期二分，直到查询完整或缩至单日后明确报错。该保护修复了
-  早期 full 扫描只覆盖查询前缀、重复运行也无法补齐后段公司的问题。
-- 提取器不再因单份报告失败终止整批：失败报告写入 `failed` 并继续下一份；本批累计 3 份
-  失败时熔断剩余 LLM 调用、保留已成功结果并让 Actions 明确标红。`failed` 继续不自动重试，
-  手动工作流新增可选 `report_id`，用于显式恢复单份报告。
-- 南钢股份 600282、report_id `1225011770` 仍是唯一已知失败报告；正式发布后先用显式入口
-  恢复。若再次失败，保留失败状态和错误证据，不阻塞其余正式池公司。
-- 修订版发现不会自动隐藏已 `extracted` 或 `review_status=accepted` 的旧版报告；只有未验收
-  旧版会转为 `skipped`。进度中的人工接受数按规范报告公司去重，不会因同公司多个版本超过
-  100%。手动 `report_id` 只接受单个 6—20 位数字，拒绝逗号和 PostgREST 过滤表达式。
-- 本轮不修改 Supabase schema、RLS、公告流程或前端字段契约。Supabase 2026 年 breaking
-  changes 检查未发现影响现有 PostgREST 表读写的事项；新表默认不暴露的变更与本轮无关。
-- 发布前完整回归为 178 项 Python 测试、6 组离线 Node 前端结构/逻辑测试和真实公开 API
-  启动测试全部通过；真实启动读取 9,220 个事件和 20,545 条结构化公告。
-
-## 43. M4 正式扩量远端文件完整性修复（2026-08-09）
-
-- 2026-08-09 状态复核发现，正式扩量发布后的 5 次定时任务均在读取
-  `config/annual_formal_2025.csv` 时触发 UTF-8 解码错误，后续元数据发现、定位和提取
-  因前置步骤失败而全部跳过，数据库因此继续停留在 119 家展示公司、正式池内 108 家。
-- 根因是发布大文件时经过了有输出长度限制的本地中间层，不是正式池生成器、GitHub Actions
-  或 Supabase 数据问题。受影响的远端文件包括正式池 CSV、`docs/PROJECT.md`、
-  `scripts/extract_periodic_reports.py` 和 `tests/test_periodic.py`；本地完整文件及回归测试未损坏。
-- 修复发布改为固定字节分块读取，在内存重组 Base64 后直接调用 GitHub 插件创建 Blob；
-  分支更新前必须逐文件核对 GitHub Blob SHA 与本地 `git hash-object`，避免“提交成功但文件
-  内容不完整”再次发生。
-- 本轮只恢复远端文件完整性并补充日志，不修改数据库结构、年报字段契约、正式池范围、
-  每批定位 48 份／提取 18 份的参数或前端展示逻辑。
-
-## 44. M6 风险案例监控正式前端与误报闸门（2026-08-11）
-
-- 产品决策调整为“真实数据早期上线”：正式站可以在官方案例为 0 时如实展示已通过闸门的
-  `媒体报道／未核实` 记录。50 份官方候选、10 个正式案例和不低于 90% 精确率继续作为
-  官方采集管线扩量目标，不再作为前端入口的开关。
-- 媒体发布器新增公司身份一致性、已发生事实与重要性三重校验，并支持重新评估既有公开
-  记录。39 条候选预演结果为 2 条保留、37 条排除、2 条既有误报撤回；生产公开层最终保留
-  江特电机和仙乐健康各 1 条，包钢/惠科公司错配与玲珑轮胎泛分析已标记 `dismissed`。
-- 新增 `009_risk_public_readonly.sql`：六张公开风险表对 `anon`/`authenticated` 仅保留
-  `SELECT`，`risk_media_leads` 与 `risk_media_backfill_windows` 无浏览器权限；八表 RLS
-  全部启用，Supabase Security Advisor 为 0 告警。
-- 正式站左侧新增“风险案例监控”，同时读取官方四表和公开媒体两表；官方案例优先去重，
-  支持公司/代码、年份、风险类型、来源、状态、证据层级筛选，高密度列表、右侧来源与证据
-  详情、UTF-8 CSV、加载/重试/错误状态和移动端布局。浏览器代码不查询私有媒体表。
-- 本地浏览器实测显示 0 条官方案例、2 条媒体记录、2 家公司；2025 年筛选缩至 1 条，
-  详情来源和未核实提示正确，390px 页面无横向溢出。真实 API 风险启动约 2.1 秒，主站启动
-  读取 9,221 个事件和 20,546 条结构化公告。
-- 回归结果：188 项 Python 测试、7 组离线 Node 测试和 2 组真实公开 API 启动测试全部通过。
-  下一步继续 M6a 官方原文纵向切片，不用为了前端展示手工录入案例。
-
-## 45. M6a 首批官方风险案例纵向切片（2026-08-11）
-
-- 新增确定性发布器 `scripts/publish_official_risk_cases.py`，复用已经采集并由 MiniMax 抽取的
-  巨潮官方公告；只对最终入选 PDF 做一次下载和原文逐字定位，不重复调用 LLM。发布器拒绝
-  管理制度阈值、假设风险、明确未发生损失及普通汇兑损失，并以稳定 `case_key` 幂等写入。
-- 首批正式入库 3 个官方衍生品重大损失案例：江特电机（官方披露实际损失达到重大标准，
-  原文未披露精确金额）、豪森智能（1,268.39 万元）和天宇股份（1,549.80 万元）。官方四表
-  均为 3 行／3 条关系／3 条证据，每个案例至少 1 份官方文档和 1 条已通过引文与数值回验的
-  页级证据；缺少精确金额的江特电机保持空值，不用媒体报道或模型推断补齐。
-- 江特电机媒体记录已转为 `officially_corroborated` 并关联正式案例；正式前端以官方案例为
-  主行、媒体为补充来源，避免重复计数。数据库仍有 2 条公开媒体记录，但页面合并后应展示
-  3 个官方案例加 1 个独立媒体线索。
-- 新增 `Risk Official Cases` 工作流：北京时间每日 09:35 自动运行，默认最多发布 3 个符合
-  严格闸门的案例；手动写入仍需 `write=true` 与 `I_UNDERSTAND` 双确认。工作流与其他风险
-  来源共用 `risk-sources` 并发锁，并上传不含密钥的 JSON 诊断快照。
-- 生产写入后真实公开 API 启动测试约 2.2 秒，读取 3 个官方案例、2 条媒体记录与 2 个媒体
-  来源；主站启动测试读取 9,221 个事件和 20,546 条结构化公告。Supabase Security Advisor
-  保持 0 项。
-- 完整回归为 200 项 Python 测试、7 组离线 Node 测试和 2 组真实公开 API 启动测试全部通过。
-  下一阶段继续补齐 CNINFO／深交所／上交所／证监会官方来源并扩大候选抽检；50 份官方候选、
-  10 个正式案例和不低于 90% 候选精确率仍是 M6a 的扩量闸门。
+- Added a manual `Build Events` workflow so derived-event rebuilds can be retried without invoking the LLM extraction step again�M{��$z{-���jם�Z�.K�>h�^�>K��X��K�^YʎXZ�[��8�[z^K��Xˮ[^zK����K�n[�^��i��z�j~k:��(	�Z�.K�>h�^�>���iʮj�Z��(	�[�nK��yY�Z�.K�>Y�z{8iz^i��Y(�X��ih~�;�h�^8 ��X��Zx�&�6���VF���VG6Y(�X�nX�.z�~X�>K��K��6W'f�6U�&��RzxiȞ���K��y�Nh�^[�iK�8.ikZ)�x��z��XZ�[� �Z�.K�>h�^[����X��X�[�>[{.X˞�X�K��[�.XZ�X��8Y�K����Z(>Y�K�ފ�yI�Y8K��[{.X�yI��8�8X[~iȞi��z��EE0�i�^k�K�NK��[�K���Yٲ��*Y
+r�X��Yވz�Z�.K�>y�NZ�XZ�Z�~j�^8 ��X��z���x~yJ�{��K�X�~��8X�Ί�h��[.{�~�ɦZ�ik�ih~K�n���[{.j�Z��K��Z�.K�>h�^�>���iʮj�Z��8.j�>[��j�K�i[ �Y(�Z�.K�>{��{J.i[X�nX��{�������55bZ��X{���h��{�~X��8j�Z��x�nhY(�i�^k����K��h��Z�.K�>{��{J.��XZ^j�>[��j�K�8 ��h��X�Z�ik�X��ih~[�n[�.h�j�>[��j�K�Y����X�~��K�^j�>[��j�K�K��K�������Z�.K�>h�^�>���K���^XX^i�^k�[�nX�j�.�x�ZHТ��i[�ɾ���h�^8i*NY��h�ni�^k�ZKiX�y�NZ�.K�>��[�^K��XZ�[�h�^[�i*NK�����K�nK��yY�zxiȞZ�����[�^8 ��Z�.K�>XZ�[�[.K�ޙ��K��j�>[��j�K�K��{���{��z�8#SK��Z�ik�X	���8K��j�>[��j�K�Y(�K��K��K���Ry�NZ�ik��X	���{+�z�x�~{�~{��x��z����z�~8 ��22C��bZ�.K�>iʮj�Z��XZ�[�[.��Y��ȃ##b���.�Ȑ���ikZ)�&�6���VF��&W�'G6K��&�6���VF��&W�'E�6�W&6W6K�N[�XZ�[�h�^[����ɾX��Zx��&�6���VF���VG6Y(�&�6���VF��&6�f����v��F�w6{�~{��X��XX��6W'f�6U�&��R����z�8 ����Z��XZ�[�K�N�����X�nh�X�����Z��K�N[�X��Zx�����NY��C�ɵ7W&6R6V7W&�G�Gf�6�"K��Y���n8 ��X�[�>Y��X�����X�n[{.ZَX*�y�NzxiȞX	������K��h�>XZ�ih~8K�ދ>yJ�֖���8.Z�>�hk.K��[�.XZ�X��K�>z�Y�z{8�iz^i��8�EE2U$�8y��Y�X�^Z�.K�>���K�^X��Y�K�[�:����Z(>K��y�N��yI�Y8���Y(�[{.X�yI��8�����ɾ��Yپ8�*Y
+~8�X��Y�i�^k�8Z�ik�Y��Y�Y(�X~���h
+~�8�h�zK�Y�~h�.{��XZ�[�8 ��y��Z��in���X[j8i�R"i�zxiȞX	����ɮk�x��yK^iˢ##R�"�#�ikkZ��J.{��h�^�>�	���~[�n[�.h�i�XZ�[� �Z�.K�>��[�^Y(�i�i�^k���[�^�ɾX�nK�i�Y�{ˮ[	X��X˞�X�XZ�X����h�.{��8.���{��h�~��K�Nj�Y�K��K�������[�.z؞��Ί��	���~8.��^��[�^X��j~k:�(	�Z�.K�>h�^�>���iʮj�Z��(	����K�ފ�XZ^j�>[��Z�ik�j�K�8 ��Z)�x�y�kX�K��X�nX�.Y��Z�YʎXi�[�>j�[��Y�z�X������XZ�[�X�[�>Y���ɴv�D�V"W6�K�^h�~��kX���^���K�ދ>yJ��Ff�Ǟ���K��K��kh��	~i	�{J"7&VF�G>8$FV��[{.Z)�X�X�Ί�h��zپ��8X�n[.h�~j~8Z�.K�>i�^k�h��[�Y(�[�ni�^k� �Z�~j�^y�B55bZ��X{����yI�K�rvV"�K��{��K��Z�Έ��k*iȞiK�X��8 ��i��j�X�[�>X�ދ��z��Y��Y��{��K��sC�s�vS�#C6CCVVf#&3&S#C�c363ss�f8.��^ikh�K�N��i[NK�0�i*NY�����[�NK���^Y��{��X��[��X��Y	h�K�Nh�nY��X�niJ����K��[ˮh����8 ��X�[�>X��Z��i[NY��[�.�	���~�ɣS����F���kX���^8�8�FV���Z�i��h�^Y�FV���yI�K�~��X�.K��Z�R�j�>[��X��z��{�>i�Nzؒb{�Nzk�{����FRkX���^���K�^X��y��Z��XZ�[��Y
+�X��kX���^�ɾY
+�X��kX���^���X�b��#3rK���K��K�nY(���C�Ri�{�>i�NX�nXZ�Y�8#�K��X�[�>ih~K�ny�NZ�n�*^X�h��h��izY�K�����yI�K�rvV"�K��Yʎ��>Y�NXh^8 ��K��K�j�^hȞx��z����X�.Z��h�(	C2K��y��Z��Z�ik�j�K�{�^Y	X�~x�~�ɮZ�.K�2�[{.y�^K��K�nX��i�^Z�ik�X��ih~��Ί^�� �5�4^855$2K��4��d��.�X�Y�����Xi�XZ^Z�ik�Y����[�n�	Z�~j�^Y��[�^ih~�ɾj�>[��K��{���{��z�K��h�K��X��8 ��22C�XZ�Y�K��K�n�)�[�ni�^k�Y��K��ZH��ȃ##b���.�Ȑ���j�Y�K��Yʂ����ɮ����螈;�k�##b�B�#�X����X�.Y(�##b�r���>�)�XZ�Y�[{.{��j�>z�h��X�nYXnY8�ZInk~�)�[�n���K�b##b�r�#B�*K��KɮXk>���X��Xi�(	Ί��j��	���~(	�8.iz~��Y��xNX��izi�K�n��h��i����Z�h���XZ�Y�K��K���)�[�ni�^k����Y�j�NK��K�n[��xZ~K��z�����i����Y(Κ)�[�nYʎX��z��i��zK�(	�iʮh����.(	�8 ��K��K�n��nj�^K��)�[�ni�^k�x�[{.�z>�
+n�ɮ��nj�^K��X�ni����Z�h��[.{�~�ɾ�)�[�nKɎXX�X�ni����Z�h��[.{�~K�ވ{>[	X�^Y
+��K�i����z��K�B��V�E�fW&�f�VC�G'VV�y�)�y�Ni�����X�.XZ�Y�8.�*K��Kɮiʮ�x�X�~�y�)�i{nY��X�Y�K��K�`�i����)�[�nXZ�Y��ɾXZ�K��K�nizX����Ί��y�)�i{nh��K��yY�i����Z�h��[.{�~y�N{��ih~i�Κ)�[�n��8 ��K��ZH�Y�i{nh��vVY(�V�FU�fW&�f�VFXi�XZ^K��K�n�)�[�n[��xZ~��Θ�XX�h��X�n[.[{.Y��8K��K�n��nh8^X�@�i��zK�[�^Y��8.ikZ)�2K��Y��[�.kX���^���X�nX���hny�niz�y�)ވ*K��KɮY��8z���y�)ފ�K��[�~��K�[{.Y�Θy�)�8��^zY(�[�^ih~Y��Z�~j�^K��yY�8 ��yI�K�~K��K�n[.[{.XZ��x��x�[���ɣ��#3rK��K��K�n8��C�RK��h�Y����Z�NXK�h�Y�8y��X[>XZ�Y�iʮh�.���ɰ�X��XX�CBK��(	�K��K�n�)�[�nK��z��K�nh�Y�iȞ�)�[�n(	ޙz�)����K����Κ)�ZInX�x�y�BbK��(	�z���y�)ފΘ�K�[{ �Y�Θy�)�(	ޙz�)�K�����K��8.k*iȞ�x�ik�>yJ����8 ������螈;�k�##bK��K�nx�YʎK��h�(	Έ*K��ZJ~Kɮ�	���~(	���Κ)�[�ni�^k�Y��X�##b�r���>�)�XZ�Y�����h.ZH��i��)�[�nY(�iȞiX�i�����ɮYXnY8K�ފ��y2K��XX2�Y�{�nK�~X�#K��XX>���ZInk~K�ފ��yB�RK��XX2�Y�{�nK�~X�3K��XX>���{��Y�K�ފ��yr�RK��XX2�Y�{�nK�~X�SK��XX>8 ��Z��i[NY��[�.�	���~�ɣc"���F���kX���^8b{�Nzk�{����FRkX���^Y(�y��Z��XZ�[��Y
+�X��kX���^�ɾY
+�X���kX���^���X�b��#3rK��K��K�n8��C�Ri�{�>i�NX�nXZ�Y�8 ��22C"��B##R[�N[�Nh�^j�>[��h���x��ȃ##b�����Ȑ���z��K���nj�^j�>[��X�nj��Y��Z�K���VFvU�WfV�G2��6��%��V#�##Vy�BÃ"Z�nXZ�X��8"�RK��K��K�n����[�nY��X�nK��6��f�r���V��f�&���##R�77f8.[��xZ~K��Ã"K��YJ�K�K�>z8izz��K�>z�ɾY�{��XZ�Y��ikZ)�K��KɮYʎi�Ι�nj�^����K��iK�X��X�nj��8 ��y��Z��i[h��j8i�^X�x�j�>[��kK��iȒ�Z�b"�*XZ�X�����X�niȒCBZ�n[	�iʮ���XZR6���W6K�����ɾK�N{��XZ�X��Y�~[�K��Ã"Z�nK��K�nX�nj�����K�ވ;�k+�yJ�iz�i���2�xNX��h�.��N8.XX>i[h��Xi�XZ^X��KɮK�^j�>[��kY�z{8���K��Y(�K�K��h
+~�J��^��i�[�XZ�X��K������[�^���k��k2W&��F�5�&W�'G2�6�FVZIn�J����K��K��iK���{�>i�N8 ��j�>[��k[�>X��Y��{��K���ɮ[{.X�x��Z�n8[{.h�X�b�Z�n8ZK�JRZ�n8[�^X�x��s2Z�n8K��[z^h�^X�p�bZ�n8.yI�K�~X��z��x�iȒ�Z�nXZ��:�K��yY��ɾX[nK��Z�nK��[�K���6��%��V#�##Vj�>[��X�nj�����K��X��[^zK�Y(�Z��X{����K�nK�ފ�XZ^i�΋��h���x����[�n8 ��Z�i{nkXz��K��h�j��b[�i{n�������iK�K��(	�XZ�[�.Yˢ##R[�N[�Nh�^XX>i[h��h��h��[�nhȞj�>[��k��~k�B(i"Z�K�Тi�ZI�C�K��(i"h�X�ni�ZI��K��(i"��>X{�XZ�X��{�~���[�n(	�8.X��Y���[�nY�~yI�h��4�����ij�[��xZ~�ɾX��Zx��K�Nh��z�>Z�K�NK��[z^h��i�^iz{;�{��h
+~�z�)�Y����h�ފ�NK�h��h�X�nK����h����X�#N8 ��XZ�[�.YˮX�x�K��i��X�^K��[�N[�ni�^��.��Έ�i��XX�hȞ�z�xKnZ�>[�nX�nK��Y��K��z�~X�>�ɾK��K�z�~X�>���X�[z�k��3�P�K����K�NK��iȞY�{��{�>i��i{n�z�X��hȞiz^i��K��X�n���y�NX�i�^��.Z��i[Nh�n{ʞ�{>X�^iz^Y�i��z�h�^�I�8.��^K��h�NK��ZH�K�`�iz�i��gV��h��h��X���hny�ni�^��.X��{�8�x�ZHދ���K��izk9^�^��Y�j�^XZ�X��y�N�z�)�8 ��h�X�nY��K��Xh�Y�X�^K��h�^Y�ZK�J^{��j�.i[Nh���ɮZK�J^h�^Y�Xi�XZRf��VF[�n{�~{��K��K�K���ɾi��h��{J���2K�ТZK�J^i{nxiNij�X��Kْ����>yJ�8K��yY�[{.h�X��{�>i��[�n��7F���2i��z�j~{�.8&f��VF{�~{��K�ވz�X���xފ�^����h��X��[z^K��kXikZ)�X����&W�'E��F���yJ�K��i��[��h.ZH�X�^K��h�^Y�8 ��X�~�*.�*K��c#�.8&W�'E��B##SssK��i��YJ�K�[{.y�^ZK�J^h�^Y��ɾj�>[��X�[�>Y�XX�yJ�i��[��XZ^X�0�h.ZH�8.��^Xh�j�ZK�J^���K��yY�ZK�J^x�nhY(ΙI������h�����K�ޙ��Z�X[nKٞj�>[��kXZ�X��8 ��K���.x��X�x�K��Kɮ�z�X�����x�[{"W�G&7FVFh�b&Wf�Wu�7FGW3�66WFVFy�Niz~x��h�^Y��ɾX��iȞiʮ���iK`�iz~x��Kɮ���K��6��VF8.���[�nK��y�NK��[z^h�^X�~i[hȞ�xN��>h�^Y�XZ�X��X뾘x����K��KɮY�Y�XZ�X��ZI�K��x��i�΋h^��p�^8.h��X��&W�'E��FX��h�^X�~X�^K��n(	C#K��i[Z�~���h�.{�ޘ	~X�~Y(��7Fu$U5B��~k�N�����[��8 ��i�΋��K��K��iK�7W&6R66�V�8$�>8XZ�Y�kXz��h�nX��z��Z�~j�^ZY{�n8%7W&6R##b[�B'&V���p�6��vW2j8i�^iʮX�x�[�Y8�x�iȒ�7Fu$U5B�����Xi�y�NK�����ɾik�������NK��i�N��.y�NX��i�NK��i�΋��izX[>8 ��X�[�>X��Z��i[NY��[�.K��s����F���kX���^8b{�Nzk�{����FRX��z��{�>i�B�����kX���^Y(�y��Z��XZ�[���Y
+�X��kX���^XZ��:��	���~�ɾy��Z��Y
+�X�����X�b��##K��K��K�nY(�#�SCRi�{�>i�NX�nXZ�Y�8 ��22C2��Bj�>[��h���x����z��ih~K�nZ��i[Nh
+~K��ZH��ȃ##b�����Ȑ���##b����x�nhZH�j�X�x����j�>[��h���x�X�[�>Y�y�BRj�Z�i{nK��X�Y�~Yʎ���X�`�6��f�r���V��f�&���##R�77fi{n�znX�UDbӂ�z>z�I�������Y�{��XX>i[h��X�x�8Z�K��Y(�h�X�`�Y�X��{��j�^��NZK�J^��XZ��:��{>��~���i[h��[�>Y�j�N{�~{��X�yY�Yʂ�Z�n[^zK�XZ�X��8j�>[��kXhR�Z�n8 ��j�Y�i��X�[�>ZJ~ih~K�ni{n{����~K�niȞ��>X{��[�[�n��X�ny�Ni��Y�K�ޙ{N[.���K��i��j�>[��kyI�h�Y��8v�D�V"7F���0�h�b7W&6Ri[h��z�)�8.X�~[�Y8�y�N���z��ih~K�nX�^h��j�>[��k55n8F�72�$��T5B��F8�67&�G2�W�G&7E�W&��F�5�&W�'G2��Y(�FW7G2�FW7E�W&��F�2���ɾi��Y�Z��i[Nih~K�nX��Y��[�.kX���^iʮh��Y��8 ��K��ZH�X�[�>iK�K��Y��Z�Z�~��.X�nY�~���X�n���YʎXh^Zَ�x�{�B&6ScBY�y�Nh�^�>yJ�v�D�V"h�.K�nX��[��&��.�ɰ�X�niJ�i�NikX��[�^���	ih~K�nj�Z��v�D�V"&��"4�K��i��Y�v�B�6���&�V7F��Θ�XX�(	�h�K�Nh�X��K�nih~K�`�Xh^Z�K��Z��i[N(	�Xh�j�X�yI�8 ��i�΋��X��h.ZHދ��z��ih~K�nZ��i[Nh
+~[�n�^XX^iz^[�~���K��K��iK�i[h��[�>{�>i�N8[�Nh�^Z�~j�^ZY{�n8j�>[��k��>Y�N8�j��h��Z�K��C�K�����h�X�b�K��y�NX�.i[h�nX��z��[^zK�����8 ��22CB��b�8�j�K�y�h�~j�>[��X��z��K����h�^�{��z��ȃ##b����Ȑ���K�~Y8Xk>z�n�>i[NK��(	�y��Z��i[h��iz�i��K��{��(	��ɮj�>[��z��X��K�^YʎZ�ik�j�K�K��i{nZh.Z��[^zK�[{.�	���~�{��z�y�@�Z�.K�>h�^�>���iʮj�Z����[�^8#SK��Z�ik�X	���8K��j�>[��j�K�Y(�K��K��K���R{+�z�x�~{�~{��K��K���Z�ik��x~��nz�{��h���x�y��j~���K��Xh�K��K��X��z��XZ^X�>y�N[�X[>8 ��Z�.K�>X�[�>Y��ikZ)�XZ�X�����K��K��{Nh
+~8[{.X�yI�K��Z��K��xފhh
+~K���x�j
+������[�niJ�h��x�ik��NK�iz.iȞXZ�[� ���[�^8#3�i�X	����(Nk�N{�>i��K��"i�K��yY�83ri�h�.��N8"i�iz.iȞ���h�^i*NY���ɾyI�K�~XZ�[�[.i�{��K��yY��k�x��yK^iˮY(�K��K�X^[�~YBi����X�^�*"�h:zyXZ�X���I��X�K��x�.x����8�k9�X�ni�[{.j~��F�6֗76VF8 ��ikZ)���&�6��V&Ɩ5�&VF��ǒ�7��ɮXZ�[�XZ�[��8���Z������WF�V�F�6FVFK�^K��yY��4T�T5F���&�6���VF���VG6K��&�6���VF��&6�f����v��F�w6izkX��x�Y��i�>���ɾXZ���$�0�XZ��:�Y
+�yJ����7W&6R6V7W&�G�Gf�6�"K��Y���n8 ��j�>[��z��[znK�~ikZ)�(	Κ8�j�K�y�h�~(	����Y�i{n���X�nZ�ik�Y����Y(�XZ�[�Z�.K�>K�N���ɾZ�ik�j�K�KɎXX�X뾘x�����iJ�h�XZ�X���K�>z8[�NK��8�8�{�Y�8i�^k�8x�nh8��h��[.{�~zپ����Κ��Z�n[�nX�~��8X�>K�~i�^k�K���h����nh8^8UDbӂ55n8X������xފ�R��I����x�nhY(�z{�X��z��[�>[8.kX��x�Y��K�>zK��i�^��.zxiȞZ�.K�>��8 ��i��Y�kX��x�Y��Z��kX�i��zK�i�Z�ik�j�K�8"i�Z�.K�>��[�^8"Z�nXZ�X���ɳ##R[�Nzپ��{ʞ�{2i�������nh8^i�^k�Y(�iʮj�Z��h�zK�j�>z����3���^��.izj��Y	k�.X{�8.y��Z����8�Y
+�X��{�b"�zy.���K��z��Y
+�X������X�b��##K��K��K�nY(�#�SCbi�{�>i�NX�nXZ�Y�8 ��Y��[�.{�>i���ɣ�����F���kX���^8r{�Nzk�{����FRkX���^Y(�"{�Ny��Z��XZ�[��Y
+�X��kX���^XZ��:��	���~8 �K��K�j�^{�~{���fZ�ik�X��ih~{�^Y	X�~x�~���K��yJ�K��K�nX��z��[^zK�h��[z^[�^XZ^j�K�8 ��22CR��f�inh��Z�ik��8�j�K�{�^Y	X�~x�~�ȃ##b����Ȑ���ikZ)�z�Z�h
+~X�[�>Y��67&�G2�V&Ɨ6���ff�6���&�6��66W2�����ZH�yJ�[{.{���x~��n[�nyK֖���h��X�ny�@�[z�k��Z�ik�XZ�Y��ɾX��Z��i�{��XZ^��DbX�K�j�K�����Y(�X��ih~�	Z�~Z�K�����K�ޘx�ZHދ>yJ����8.X�[�>Y��h�.{�Тz�ynX�n[�n���X�8X~���8�8i��z�iʮX�yI�h��ZKX��i��	�k~XYh��ZK���[�nK�^z�>Z�66U��W�[�.z؞Xi�XZ^8 ���inh��j�>[��XZ^[�22K��Z�ik���yI�Y8�x�ZJ~h��ZKj�K��ɮk�x��yK^iˮ�ȎZ�ik�h����.Z�^h��ZK���X��x�ZJ~j~Xxn����X��ih~iʮh����.{+�z�y�)��Ȟ8��j:�i���;��ȃ�#c��3�K�~XX>�ȞY(�ZJ�Z�~�*K���ȃ�SC��K�~XX>�Ȟ8.Z�ik�Y�����Y�~K��2�����2i�X[>{;����2i���h�����j��K��j�K辈{>[	K��Z�ik�ih~j>Y(�i�[{.�	���~[�^ih~K��i[X�Y��y�@��^{�~��h���ɾ{ˮ[	{+�z�y�)�y�Nk�x��yK^iˮK��h�z��X����K��yJ�Z�.K�>h�^�>h�nj�Y�h�ijފ^��8 ��k�x��yK^iˮZ�.K�>��[�^[{.���K���ff�6��Ǖ�6�'&�&�&FVF[�nX[>�Nj�>[��j�K��ɾj�>[��X��z��K�^Z�ik�j�K�K���K����8Z�.K�>K���^XX^i�^k���Θ�XXޘx�ZHފ�i[8.i[h��[�>K��iȒ"i�XZ�[�Z�.K�>��[�^���K�n�^��.Y�[�nY�[�N[^zK��2K��Z�ik�j�K�X�K��x��z��Z�.K�>{��{J.8 ��ikZ)�&�6��ff�6��66W6[z^K��kX�ɮX�~K��i{n�{Nj��izR��3R�z�X��������Λ����Ni�ZI�X�[�22K��z�nY��K�^jΙ{��z�y�Nj�K��ɾh��X��Xi�XZ^K�ޙ�w&�FS�G'VVK����T�DU%5D�FX��z��N8.[z^K��kXK��X[nK�n�8��i�^k�X[yJ�&�6��6�W&6W6[�nX��H���[�nK��K�K��Y
+�Z�n�*^y�B�4�����ij�[��xZ~8 ��yI�K�~Xi�XZ^Y�y��Z��XZ�[��Y
+�X��kX���^{�b"�"zy.��Ί��X�b2K��Z�ik�j�K�8"i�Z�.K�>��[�^K��"K��Z�.K�0�i�^k��ɾK��z��Y
+�X��kX���^���X�b��##K��K��K�nY(�#�SCbi�{�>i�NX�nXZ�Y�8%7W&6R6V7W&�G�Gf�6� �K��h���8 ��Z��i[NY��[�.K��#���F���kX���^8r{�Nzk�{����FRkX���^Y(�"{�Ny��Z��XZ�[��Y
+�X��kX���^XZ��:��	���~8 �K��K���nj�^{�~{�ފ^��4��d����k{K�Nh����K��K�Nh������y�KɮZ�ik�i�^k�[�nh��ZJ~X	���h��j8�ɳSK��Z�ik�X	���8�K��j�>[��j�K�Y(�K��K��K���RX	���{+�z�x�~K��i���fy�Nh���x��{��z�8 ��22Cb��fK�Ni�>h�Z�ik�i�^k�X�΋ڎh��[^�ȃ##b����Ȑ���G&6�[{.Yʎi��Y�Z��h�j�>[��j�K�X�[�>Y��y�NZ)�x�h��j�K��ZH��ɮXX�h�.��N[{.{��ZَYʎy�B6��f������C����Xh�[�NyJ�h��j�K�����ɾXZ��:�X	���Y�~[{.X�[�>i{nK��K��j�>[��z��h��j�{�>i�����K��Xhފ�j��iz^K��X�ZK�J^8.yI�K�~X�[�>Y�(N��ikZ)�X�X��iki�Y(�xJnK��K�~ik�"K��[{.�	���rDbX��ih~j����y�Nj�K����j�>[��Z�ik�j�K�yK2K��Z)�{2RK���ɾi��j8i�^x+�K��h�X��Z�>z{[{.Xi�[�>8 ��G&6�"ikZ)�k{K�Nh�Z�ik�i�^k��.�X�Y�����[�nh���x~��nY��h��[^K��76V87�6V8��K��zx�j�[��8.K��K�Nh�{�~{��K��yJ�Z�ik�i�^��.h�^X�>�ɾk{K�Nh�{��y��Z��^��.h�.i�^z��NyKkX��x�Y���>yJ����&W�'B�6��u&W�'B�FF���Y�j�N�.�X�Y�����X�nZ�{��4��h�^��h�^X�>X��Z�ik�DbK��iˮ��Έ�K��i������z>i�k*iȞi[h���y�N�ٞh�D��ZInZ;>8 ��K�Ni�>h��x~��nX��Xi�&�6��6�W&6U�F�7V�V�G6X	���[.���K��Kɮ�z�X��X��[��FW&�fF�fU�&�6��66W68.X�^K�i�^k�ZK�J^i{n���X�nK�i�^k�y�N[��xZ~Y(�h�X��Xi�XZ^K�ފ*�K��yY����ZK�J^j�>ih~j~��K��f��VF8.j��ZJ�X�~K��i{n�{B��z�X������i���3K���z�xKniz^y�N�x�X�z�~X�>�ɾh��[z^Xi�XZ^K�ޙ�w&�FS�G'VVK����T�DU%5D�FX��z��N8 ��i��Y�y��Z��G'��'V��ɮK��K�Nh�32K��ih~j>���X	���832izX[>8ZK�J^�ɾk{K�Nh�3RK��ih~j>���X	����ȎZI�k	�ZI�y�z�X{��Ȟ83BizX[>8ZK�J^8.j�>[���8��^��.y�NZ�ik�ih~j>��~k.Z)�X�7FGW3�W�G&7FVF���X	���kZ)�[�K��Kɮ�*�kX��x�Y��i[Nk���X�n8 ��X�[�>X	�����Ί��ɣ#���F���kX���^8r{�Nzk�{����FRkX���^XZ��:��	���~�ɾy��Z��8��^Y
+�X��K��2K��Z�ik�j�K�8"i�Z�.K�>��[�^8"K��Z�.K�>i�^k����{�b"�zy.�ɾK��z��Y
+�X��K����##K��K��K�nY(�#�SCbi�{�>i�NX�nXZ�Y�8$v�D�V"X�[�>87F���2Xi�XZ^8Rj�K�yI�K�~j����8[�.z؞ZHދyX��6V7W&�G�Gf�6�"{�>i�Ί�[�^YʂF�72�v�&���w2�v�&���u�##b����2��F���iʮZ��h���K��[�~h�X��Xi�h�h�X��8 

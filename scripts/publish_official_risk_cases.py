@@ -257,8 +257,17 @@ def build_official_bundle(row: dict[str, Any], *, verified_text: str) -> Officia
     return OfficialBundle(source=source, case=case, relation=relation, evidence=evidence)
 
 
-def select_publishable(rows: Iterable[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
-    accepted = [row for row in rows if assess_official_candidate(row).accepted]
+def select_publishable(
+    rows: Iterable[dict[str, Any]],
+    limit: int,
+    existing_source_doc_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    existing = existing_source_doc_ids or set()
+    accepted = [
+        row for row in rows
+        if assess_official_candidate(row).accepted
+        and f"cninfo:{row['ann_id']}" not in existing
+    ]
     accepted.sort(key=lambda row: (str(row.get("ann_date") or ""), str(row.get("ann_id") or "")), reverse=True)
     return accepted[:max(0, limit)]
 
@@ -399,13 +408,27 @@ def main() -> None:
     except ModuleNotFoundError:
         from common import log, sb_insert, sb_select, sb_update, sb_upsert, snapshot_json
 
+    existing_source_doc_ids = {
+        str(row["source_doc_id"])
+        for row in sb_select(
+            "risk_source_documents",
+            {"select": "source_doc_id"},
+            paginate=True,
+        )
+    }
     rows = load_candidate_rows(sb_select)
-    candidates = select_publishable(rows, limit=len(rows))
+    candidates = select_publishable(
+        rows,
+        limit=max(1, args.limit),
+        existing_source_doc_ids=existing_source_doc_ids,
+    )
+    if not candidates:
+        snapshot_json("official_risk_cases", {"selected": [], "rejected": []})
+        log("No unpublished official risk case candidates; completed as a normal no-op")
+        return
     bundles: list[OfficialBundle] = []
     rejected: list[dict[str, str]] = []
     for row in candidates:
-        if len(bundles) >= max(1, args.limit):
-            break
         try:
             text = fetch_pdf_text(row["pdf_url"])
             bundles.append(build_official_bundle(row, verified_text=text))

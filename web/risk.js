@@ -272,11 +272,11 @@ function renderBrowser() {
   document.querySelector("#risk-empty").hidden = rows.length !== 0;
 }
 
-async function loadPayload() {
+export async function loadPayload() {
   const apiAll = window.HedgeShell.apiAll;
   const [cases, sourceDocuments, documents, evidence, reports, sources] = await Promise.all([
     apiAll("derivative_risk_cases", { select: "case_key,code,company_name,event_date,first_disclosure_date,risk_type,instruments,underlyings,summary,amount,currency,unit,regulatory_action,outcome,case_status", order: "event_date.desc.nullslast,case_key.asc" }),
-    apiAll("risk_source_documents", { select: "source_doc_id,source_org,source_type,title,publish_date,document_url", order: "publish_date.desc.nullslast,source_doc_id.asc" }),
+    apiAll("risk_source_documents", { select: "source_doc_id,source_org,source_type,title,publish_date,document_url", status: "eq.extracted", order: "publish_date.desc.nullslast,source_doc_id.asc" }),
     apiAll("risk_case_documents", { select: "case_key,source_doc_id,relation_type", order: "case_key.asc,source_doc_id.asc" }),
     apiAll("risk_case_evidence", { select: "id,case_key,source_doc_id,field,page,quote,extracted_value,source_url,quote_verified,value_verified", order: "case_key.asc,id.asc" }),
     apiAll("risk_media_reports", { select: "media_key,code,company_name,event_date,risk_type,instruments,underlyings,summary,verification_status,official_case_key,publish_status", publish_status: "in.(published,corroborated)", order: "event_date.desc,media_key.asc" }),

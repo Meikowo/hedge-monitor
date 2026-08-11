@@ -28,7 +28,7 @@ async function rows(table, params = {}) {
 const startedAt = Date.now();
 const [cases, sourceDocuments, documents, evidence, reports, sources] = await Promise.all([
   rows("derivative_risk_cases", { select: "case_key,code,company_name,event_date,first_disclosure_date,risk_type,instruments,underlyings,summary,amount,currency,unit,regulatory_action,outcome,case_status" }),
-  rows("risk_source_documents", { select: "source_doc_id,source_org,source_type,title,publish_date,document_url" }),
+  rows("risk_source_documents", { select: "source_doc_id,source_org,source_type,title,publish_date,document_url", status: "eq.extracted" }),
   rows("risk_case_documents", { select: "case_key,source_doc_id,relation_type" }),
   rows("risk_case_evidence", { select: "id,case_key,source_doc_id,field,page,quote,extracted_value,source_url,quote_verified,value_verified" }),
   rows("risk_media_reports", { select: "media_key,code,company_name,event_date,risk_type,instruments,underlyings,summary,verification_status,official_case_key,publish_status", publish_status: "in.(published,corroborated)" }),
