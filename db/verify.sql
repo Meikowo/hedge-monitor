@@ -159,3 +159,27 @@ from risk_media_report_sources;
 
 -- 使用 anon 身份通过 REST 验证：上面两张投影表可读；
 -- risk_media_leads 与 risk_media_backfill_windows 应返回权限错误或不可见。
+
+-- V16. 风险数据浏览器权限（预期：六张公开表仅 SELECT；两张私有表无 anon/authenticated 权限）
+select grantee, table_name, privilege_type
+from information_schema.role_table_grants
+where table_schema = 'public'
+  and grantee in ('anon', 'authenticated')
+  and table_name in (
+    'risk_source_documents', 'derivative_risk_cases',
+    'risk_case_documents', 'risk_case_evidence',
+    'risk_media_reports', 'risk_media_report_sources',
+    'risk_media_leads', 'risk_media_backfill_windows'
+  )
+order by table_name, grantee, privilege_type;
+
+select tablename, rowsecurity
+from pg_tables
+where schemaname = 'public'
+  and tablename in (
+    'risk_source_documents', 'derivative_risk_cases',
+    'risk_case_documents', 'risk_case_evidence',
+    'risk_media_reports', 'risk_media_report_sources',
+    'risk_media_leads', 'risk_media_backfill_windows'
+  )
+order by tablename;

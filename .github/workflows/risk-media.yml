@@ -9,7 +9,9 @@ on:
       - 'config/risk_media_queries.yml'
       - 'config/risk_media_publishers.yml'
       - 'db/008_risk_media_public.sql'
+      - 'db/009_risk_public_readonly.sql'
       - 'tests/test_risk_media_public.py'
+      - 'tests/test_risk_schema.py'
   workflow_dispatch:
     inputs:
       query_limit:
@@ -85,7 +87,7 @@ jobs:
         run: python scripts/publish_risk_media_reports.py --write
       - name: Validate media collector on push
         if: github.event_name == 'push'
-        run: python -m unittest tests.test_risk_media tests.test_risk_media_backfill tests.test_risk_media_public -v
+        run: python -m unittest tests.test_risk_media tests.test_risk_media_backfill tests.test_risk_media_public tests.test_risk_schema -v
       - uses: actions/upload-artifact@v4
         if: always()
         with:

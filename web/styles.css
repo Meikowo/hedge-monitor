@@ -466,6 +466,29 @@ a { color: inherit; }
 .periodic-status--review { border-color: #e7c879; background: #fff9e8; color: #7a5400; }
 .periodic-evidence-button { appearance: none; padding: 0; border: 0; background: transparent; color: #1d4ed8; font: inherit; cursor: pointer; }
 
+.risk-view { display: grid; gap: 14px; }
+.risk-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.risk-summary article { min-width: 0; padding: 13px 15px; border-right: 1px solid var(--border); }
+.risk-summary article:last-child { border-right: 0; }
+.risk-summary span, .risk-summary strong, .risk-summary small { display: block; }
+.risk-summary span { color: var(--muted); font-size: 10px; }
+.risk-summary strong { margin-top: 4px; font-size: 21px; letter-spacing: -.03em; }
+.risk-summary small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.risk-panel { overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.risk-filters { display: grid; grid-template-columns: minmax(240px, 1.6fr) repeat(5, minmax(112px, .65fr)); gap: 7px; padding: 9px; border-bottom: 1px solid var(--border); background: #fafafa; }
+.risk-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 8px 11px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10px; }
+.risk-toolbar div { display: flex; align-items: baseline; gap: 9px; }
+.risk-toolbar strong { color: var(--foreground); font-size: 11px; }
+.risk-table-scroll { max-height: calc(100vh - 280px); }
+.risk-table { min-width: 1180px; }
+.risk-table th { position: sticky; top: 0; z-index: 2; white-space: nowrap; }
+.risk-table td { vertical-align: top; }
+.risk-table th:nth-child(2), .risk-table td:nth-child(2) { position: sticky; left: 0; z-index: 1; min-width: 180px; background: var(--surface); box-shadow: 1px 0 0 var(--border); }
+.risk-table th:nth-child(2) { z-index: 3; background: #f8f8f8; }
+.risk-level { display: inline-flex; align-items: center; min-height: 21px; padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 999px; font-size: 9px; white-space: nowrap; }
+.risk-level--official { border-color: #b7d8c4; background: #f1faf4; color: #17633a; }
+.risk-level--media { border-color: #e7c879; background: #fff9e8; color: #7a5400; }
+
 @media (max-width: 1080px) {
   .app-shell { grid-template-columns: 190px minmax(0, 1fr); }
   .filter-row { grid-template-columns: minmax(260px, 1fr) repeat(3, 132px); }
@@ -501,6 +524,11 @@ a { color: inherit; }
   .periodic-summary article:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
   .periodic-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .periodic-filters .search-field { grid-column: 1 / -1; }
+  .risk-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .risk-summary article:nth-child(2) { border-right: 0; }
+  .risk-summary article:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
+  .risk-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .risk-filters .search-field { grid-column: 1 / -1; }
 
   .table-scroll { overflow: visible; }
   .data-table { min-width: 0; }
@@ -524,6 +552,9 @@ a { color: inherit; }
   .periodic-table td { display: table-cell; width: auto; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .periodic-table td::before { display: none; }
   .periodic-table td:nth-child(1), .periodic-table td:nth-last-child(1) { grid-row: auto; grid-column: auto; }
+  .risk-table-scroll { max-height: none; overflow: visible; }
+  .risk-table { min-width: 0; }
+  .risk-table th:nth-child(2), .risk-table td:nth-child(2) { position: static; min-width: 0; box-shadow: none; }
   .evidence-link { margin-top: 3px; }
   .pagination-pages .page-button:not(.is-active) { display: none; }
 }
@@ -539,6 +570,9 @@ a { color: inherit; }
   .periodic-filters { grid-template-columns: 1fr; }
   .periodic-filters .search-field { grid-column: auto; }
   .periodic-toolbar { align-items: flex-start; flex-direction: column; }
+  .risk-filters { grid-template-columns: 1fr; }
+  .risk-filters .search-field { grid-column: auto; }
+  .risk-toolbar { align-items: flex-start; flex-direction: column; }
   .table-toolbar { align-items: flex-start; flex-direction: column; padding-block: 8px; }
   .toolbar-right { width: 100%; justify-content: space-between; }
   .detail-drawer .drawer-panel { width: 100%; }

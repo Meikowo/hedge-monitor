@@ -118,7 +118,7 @@ class PublicationGateTest(unittest.TestCase):
         self.accepted = {
             "lead_key": "tavily:accepted",
             "code": "002176",
-            "company_name": "江西特种电机股份有限公司",
+            "company_name": "江特电机",
             "source_domain": "finance.sina.com.cn",
             "title": "江特电机商品期货套期保值发生亏损",
             "snippet": "据公司披露，碳酸锂期货套保累计亏损超过5000万元。",
@@ -186,7 +186,37 @@ class PublicationGateTest(unittest.TestCase):
                 title="江特电机开展商品期货套期保值",
                 snippet="若保证金不足可能造成损失。",
             ),
-            "未找到同一语境内已发生的衍生品风险",
+            "未找到具备重要性的已发生衍生品不利事实",
+        )
+
+    def test_company_mismatch_is_rejected_even_when_code_was_preassigned(self):
+        self.assertEqual(
+            self.rejection(
+                code="600010",
+                company_name="内蒙古包钢钢联股份有限公司",
+                title="慧科公司开展期货套期保值可能产生重大亏损",
+                snippet="慧科公司期货交易发生亏损，金额超过一千万元。",
+            ),
+            "媒体内容与上市公司身份不一致",
+        )
+
+    def test_general_analysis_is_not_an_actual_derivative_risk_case(self):
+        self.assertEqual(
+            self.rejection(
+                code="601966",
+                company_name="玲珑轮胎",
+                title="玲珑轮胎外汇损失不代表套期保值失败",
+                snippet="文章分析汇率波动和套期保值制度，并未披露衍生品交易损失。",
+            ),
+            "未找到具备重要性的已发生衍生品不利事实",
+        )
+
+    def test_explicit_actual_material_loss_is_accepted(self):
+        self.assertIsNone(
+            self.rejection(
+                title="江特电机商品期货套期保值发生重大亏损",
+                snippet="公司确认碳酸锂期货累计亏损超过1000万元，占净利润10%以上。",
+            )
         )
 
 
@@ -199,7 +229,7 @@ class PublicationGroupingTest(unittest.TestCase):
         self.lead = {
             "lead_key": "tavily:first-accepted",
             "code": "002176",
-            "company_name": "江西特种电机股份有限公司",
+            "company_name": "江特电机",
             "source_domain": "finance.sina.com.cn",
             "title": "江特电机商品期货套期保值发生亏损",
             "snippet": "据公司披露，碳酸锂期货套保累计亏损超过5000万元。",
@@ -281,6 +311,73 @@ class PublicationGroupingTest(unittest.TestCase):
         )
         self.assertEqual(len(batch.lead_updates), 2)
 
+    def test_existing_false_positive_is_dismissed_but_valid_report_is_retained(self):
+        false_key = "media:false-positive"
+        false_lead = {
+            **self.lead,
+            "lead_key": "tavily:false-positive",
+            "code": "601966",
+            "company_name": "玲珑轮胎",
+            "title": "玲珑轮胎外汇损失不代表套期保值失败",
+            "snippet": "文章分析汇率波动和套期保值制度，并未披露衍生品交易损失。",
+            "raw_metadata": {"public_media_key": false_key},
+        }
+        existing = [
+            {
+                "media_key": false_key,
+                "code": "601966",
+                "event_date": "2025-12-28",
+                "risk_type": "loss",
+                "instruments": ["外汇远期"],
+                "publish_status": "published",
+            },
+            {
+                "media_key": "media:valid",
+                "code": "002176",
+                "event_date": "2025-12-28",
+                "risk_type": "loss",
+                "instruments": ["商品期货"],
+                "publish_status": "published",
+            },
+        ]
+
+        batch = self.publisher.publish_candidates(
+            [false_lead, self.lead], existing, self.policy
+        )
+
+        self.assertEqual(
+            batch.report_updates,
+            [{"media_key": false_key, "publish_status": "dismissed"}],
+        )
+
+    def test_reconciliation_does_not_dismiss_when_any_linked_source_still_passes(self):
+        media_key = "media:shared"
+        valid = {
+            **self.lead,
+            "raw_metadata": {"public_media_key": media_key},
+        }
+        invalid = {
+            **self.lead,
+            "lead_key": "tavily:invalid-shared",
+            "title": "江特电机开展商品期货套期保值",
+            "snippet": "若保证金不足可能造成损失。",
+            "raw_metadata": {"public_media_key": media_key},
+        }
+        existing = [{
+            "media_key": media_key,
+            "code": "002176",
+            "event_date": "2025-12-28",
+            "risk_type": "loss",
+            "instruments": ["商品期货"],
+            "publish_status": "published",
+        }]
+
+        batch = self.publisher.publish_candidates(
+            [valid, invalid], existing, self.policy
+        )
+
+        self.assertEqual(batch.report_updates, [])
+
     def test_dismissed_or_corroborated_leads_do_not_create_media_rows(self):
         dismissed = {**self.lead, "status": "dismissed"}
         corroborated = {
@@ -315,6 +412,44 @@ class PublicationGroupingTest(unittest.TestCase):
         patch = calls[2][3]["json_body"]
         self.assertEqual(set(patch), {"raw_metadata"})
         self.assertIn("public_media_key", patch["raw_metadata"])
+
+    def test_persistence_applies_report_dismissals_idempotently(self):
+        batch = self.publisher.publish_candidates(
+            [{
+                **self.lead,
+                "title": "江特电机开展商品期货套期保值",
+                "snippet": "若保证金不足可能造成损失。",
+                "raw_metadata": {"public_media_key": "media:old"},
+            }],
+            [{
+                "media_key": "media:old",
+                "code": "002176",
+                "event_date": "2025-12-28",
+                "risk_type": "loss",
+                "instruments": ["商品期货"],
+                "publish_status": "published",
+            }],
+            self.policy,
+        )
+        calls = []
+
+        def fake_upsert(table, rows, on_conflict):
+            calls.append(("upsert", table, copy.deepcopy(rows)))
+            return len(rows)
+
+        def fake_request(method, path, **kwargs):
+            calls.append((method, path, copy.deepcopy(kwargs)))
+            return object()
+
+        self.publisher.persist_batch(batch, fake_upsert, fake_request)
+        dismissal = next(
+            call for call in calls
+            if call[0] == "PATCH" and call[1] == "risk_media_reports"
+        )
+        self.assertEqual(dismissal[2]["params"], {"media_key": "eq.media:old"})
+        self.assertEqual(
+            dismissal[2]["json_body"], {"publish_status": "dismissed"}
+        )
 
     def test_parent_failure_prevents_source_and_private_writes(self):
         batch = self.publisher.publish_candidates([self.lead], [], self.policy)
@@ -414,7 +549,9 @@ class PublicationWorkflowTest(unittest.TestCase):
             "scripts/publish_risk_media_reports.py",
             "config/risk_media_publishers.yml",
             "db/008_risk_media_public.sql",
+            "db/009_risk_public_readonly.sql",
             "tests/test_risk_media_public.py",
+            "tests/test_risk_schema.py",
         }
         for workflow_name, job_name in (
             ("risk-media.yml", "collect"),
@@ -430,6 +567,7 @@ class PublicationWorkflowTest(unittest.TestCase):
                     if step.get("if") == "github.event_name == 'push'"
                 )
                 self.assertIn("tests.test_risk_media_public", validation["run"])
+                self.assertIn("tests.test_risk_schema", validation["run"])
                 self.assertNotIn("TAVILY_API_KEY", validation.get("env", {}))
 
 

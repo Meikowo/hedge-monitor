@@ -228,7 +228,9 @@ class RiskMediaWorkflowTest(unittest.TestCase):
                 "config/risk_media_queries.yml",
                 "config/risk_media_publishers.yml",
                 "db/008_risk_media_public.sql",
+                "db/009_risk_public_readonly.sql",
                 "tests/test_risk_media_public.py",
+                "tests/test_risk_schema.py",
             ],
         )
         inputs = triggers["workflow_dispatch"]["inputs"]

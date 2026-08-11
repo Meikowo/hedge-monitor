@@ -6,10 +6,11 @@
     <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="A 股上市公司套期保值事件与公告数据终端" />
     <title>Hedge Monitor · 套保事件</title>
-    <link rel="stylesheet" href="styles.css?v=20260729-2" />
-    <script src="config.js?v=20260729-2"></script>
-    <script src="app.js?v=20260729-2" defer></script>
-    <script type="module" src="periodic.js?v=20260729-2"></script>
+    <link rel="stylesheet" href="styles.css?v=20260811-1" />
+    <script src="config.js?v=20260811-1"></script>
+    <script src="app.js?v=20260811-1" defer></script>
+    <script type="module" src="periodic.js?v=20260811-1"></script>
+    <script type="module" src="risk.js?v=20260811-1"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -35,6 +36,9 @@
           </button>
           <button class="side-link" type="button" data-view="actuals">
             <span>计划与实际</span><strong id="nav-periodic-count">—</strong>
+          </button>
+          <button class="side-link" type="button" data-view="risk">
+            <span>风险案例监控</span><strong id="nav-risk-count">—</strong>
           </button>
         </nav>
 
@@ -253,6 +257,65 @@
                     </tr>
                   </thead>
                   <tbody id="periodic-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="risk-view" id="risk-view" hidden>
+            <div class="risk-summary" aria-label="风险案例数据概览">
+              <article><span>官方案例</span><strong id="risk-official-count">—</strong><small>监管或公司官方证据</small></article>
+              <article><span>媒体线索</span><strong id="risk-media-count">—</strong><small>具名媒体／尚未核实</small></article>
+              <article><span>覆盖公司</span><strong id="risk-company-count">—</strong><small>按股票代码去重</small></article>
+              <article><span>重大损失</span><strong id="risk-loss-count">—</strong><small>风险类型统计</small></article>
+            </div>
+
+            <div class="risk-panel">
+              <div class="risk-filters">
+                <label class="search-field">
+                  <span class="search-mark" aria-hidden="true"></span>
+                  <input id="risk-search" type="search" placeholder="搜索公司、代码、风险、工具或品种" autocomplete="off" />
+                </label>
+                <label class="select-field"><span>事件年度</span><select id="risk-year-filter"><option value="all">全部</option></select></label>
+                <label class="select-field"><span>风险类型</span><select id="risk-type-filter"><option value="all">全部</option></select></label>
+                <label class="select-field"><span>来源</span><select id="risk-source-filter"><option value="all">全部</option></select></label>
+                <label class="select-field"><span>状态</span><select id="risk-status-filter"><option value="all">全部</option></select></label>
+                <label class="select-field">
+                  <span>证据层级</span>
+                  <select id="risk-evidence-filter">
+                    <option value="all">全部</option>
+                    <option value="official_verified">官方证据</option>
+                    <option value="media_unverified">媒体报道／未核实</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="risk-toolbar">
+                <div><strong id="risk-result-count">—</strong><span>一行表示一个衍生品风险事件</span></div>
+                <button class="button button--secondary export-button" id="risk-export-button" type="button">导出当前结果</button>
+              </div>
+
+              <div id="risk-loading" class="state-panel" hidden>
+                <span class="loader" aria-hidden="true"></span>
+                <strong>正在读取风险案例数据</strong>
+                <span>加载官方文档、逐字段证据与已发布媒体记录</span>
+              </div>
+              <div id="risk-error" class="state-panel state-panel--error" hidden>
+                <strong>风险案例数据暂时无法读取</strong>
+                <span id="risk-error-message">请稍后重试。</span>
+              </div>
+              <div id="risk-empty" class="state-panel" hidden>
+                <strong>当前筛选没有风险记录</strong>
+                <span>官方案例为 0 时会如实显示；媒体记录仅展示通过发布闸门的条目。</span>
+              </div>
+
+              <div id="risk-table-wrap" class="table-scroll risk-table-scroll" hidden>
+                <table class="data-table risk-table">
+                  <thead><tr>
+                    <th>事件日期</th><th>公司</th><th>风险类型</th><th>工具 / 品种</th>
+                    <th>证据层级</th><th>状态</th><th>来源</th><th>详情</th>
+                  </tr></thead>
+                  <tbody id="risk-body"></tbody>
                 </table>
               </div>
             </div>

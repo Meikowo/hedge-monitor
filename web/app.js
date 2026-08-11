@@ -417,15 +417,17 @@
     const isEvents = state.view === "events";
     const isAnnouncements = state.view === "announcements";
     const isActuals = state.view === "actuals";
-    $("#page-title").textContent = isDashboard ? "数据看板" : isEvents ? "套保事件" : isAnnouncements ? "公告原流" : "计划与实际";
-    $("#page-subtitle").textContent = isDashboard ? "公司覆盖、事件结构与字段质量" : isEvents ? "按公司、年度与类别聚合" : isAnnouncements ? "结构化公告与证据记录" : "定期报告实际情况、损益与套期会计";
-    $("#breadcrumb-view").textContent = isDashboard ? "看板" : isEvents ? "事件" : isAnnouncements ? "公告" : "计划与实际";
+    const isRisk = state.view === "risk";
+    $("#page-title").textContent = isDashboard ? "数据看板" : isEvents ? "套保事件" : isAnnouncements ? "公告原流" : isActuals ? "计划与实际" : "风险案例监控";
+    $("#page-subtitle").textContent = isDashboard ? "公司覆盖、事件结构与字段质量" : isEvents ? "按公司、年度与类别聚合" : isAnnouncements ? "结构化公告与证据记录" : isActuals ? "定期报告实际情况、损益与套期会计" : "衍生品相关监管案例与具名媒体线索";
+    $("#breadcrumb-view").textContent = isDashboard ? "看板" : isEvents ? "事件" : isAnnouncements ? "公告" : isActuals ? "计划与实际" : "风险案例";
     $$('[data-view]').forEach((button) => button.classList.toggle("is-active", button.dataset.view === state.view));
     $("#dashboard-view").hidden = !isDashboard;
     $("#periodic-view").hidden = !isActuals;
-    $("#data-panel").hidden = isDashboard || isActuals;
-    $("#metric-grid").hidden = isAnnouncements || isActuals;
-    $("#clear-filters").hidden = isDashboard || isActuals;
+    $("#risk-view").hidden = !isRisk;
+    $("#data-panel").hidden = isDashboard || isActuals || isRisk;
+    $("#metric-grid").hidden = isAnnouncements || isActuals || isRisk;
+    $("#clear-filters").hidden = isDashboard || isActuals || isRisk;
     $("#events-table-wrap").hidden = !isEvents;
     $("#announcements-table-wrap").hidden = isEvents || isDashboard;
     $("#error-state").hidden = true;
@@ -655,6 +657,17 @@
         if (message) message.textContent = error?.message || "定期报告数据读取失败";
       }
     }
+    if (view === "risk") {
+      updateViewChrome();
+      try {
+        await window.HedgeRisk?.activate();
+      } catch (error) {
+        const target = $("#risk-error");
+        if (target) target.hidden = false;
+        const message = $("#risk-error-message");
+        if (message) message.textContent = error?.message || "风险案例数据读取失败";
+      }
+    }
     renderCurrentView();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -733,6 +746,11 @@
       if (state.view === "actuals") {
         await window.HedgePeriodic?.refresh();
         showToast("定期报告数据已刷新");
+        return;
+      }
+      if (state.view === "risk") {
+        await window.HedgeRisk?.refresh();
+        showToast("风险案例数据已刷新");
         return;
       }
       state.announcements = null;

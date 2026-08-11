@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,38 @@ class PublicationBatch:
     sources: list[dict[str, Any]]
     lead_updates: list[dict[str, Any]]
     rejections: dict[str, str]
+    report_updates: list[dict[str, Any]]
+
+
+NON_EVENT_PHRASES = (
+    "不代表",
+    "≠",
+    "市场误解",
+    "不能只盯",
+    "并不完全对应",
+    "风险分析",
+    "风险控制措施",
+    "风险因素",
+    "可能造成",
+    "可能产生",
+    "存在风险",
+    "存在因",
+    "仅供投资者参考",
+)
+MATERIAL_EVENT_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"(?:重大|巨额|大额).{0,12}(?:亏损|损失)",
+        r"(?:亏损|损失|损益).{0,24}(?:人民币)?\s*[+-]?[\d,]+(?:\.\d+)?\s*(?:万|亿|千)?元",
+        r"(?:亏损|损失|损益).{0,36}[+-]?\d[\d,]{3,}(?:\.\d+)?",
+        r"[+-]?\d[\d,]{3,}(?:\.\d+)?.{0,36}(?:衍生品|期货|期权|远期|掉期).{0,18}(?:亏损|损失|损益)",
+        r"(?:亏损|损失).{0,24}\d+(?:\.\d+)?%",
+        r"(?:占|超过|超).{0,24}\d+(?:\.\d+)?%",
+        r"(?:爆仓|强制平仓|强平|保证金不足|未经授权|超授权)",
+        r"(?:收到|下发|出具|发布).{0,20}(?:问询函|监管问询|关注函)",
+        r"(?:行政处罚|立案调查|纪律处分|通报批评|责令整改)",
+    )
+)
 
 
 def _normalize_host(value: str | None) -> str:
@@ -87,6 +120,43 @@ def publisher_for_domain(domain: str | None, policy: PublisherPolicy) -> str | N
     return max(matches, key=lambda item: len(item[0]))[1]
 
 
+def _company_aliases(company_name: str) -> tuple[str, ...]:
+    clean = re.sub(r"\s+", "", company_name)
+    aliases = {clean}
+    for suffix in (
+        "集团股份有限公司", "股份有限公司", "集团有限公司", "有限责任公司",
+        "有限公司", "集团", "股份",
+    ):
+        if clean.endswith(suffix):
+            aliases.add(clean[: -len(suffix)])
+    return tuple(alias for alias in aliases if len(alias) >= 4)
+
+
+def company_identity_present(lead: dict[str, Any]) -> bool:
+    code = str(lead.get("code") or "").strip()
+    company_name = str(lead.get("company_name") or "").strip()
+    text = f"{lead.get('title') or ''}\n{lead.get('snippet') or ''}"
+    explicit_codes = set(re.findall(r"(?<!\d)([0368]\d{5})(?!\d)", text))
+    if explicit_codes:
+        return code in explicit_codes
+    return any(alias in text for alias in _company_aliases(company_name))
+
+
+def material_derivative_event_contexts(lead: dict[str, Any]) -> list[str]:
+    contexts = relevant_contexts(
+        str(lead.get("title") or ""),
+        str(lead.get("snippet") or ""),
+    )
+    accepted: list[str] = []
+    for context in contexts:
+        compact = re.sub(r"\s+", "", context)
+        if any(phrase in compact for phrase in NON_EVENT_PHRASES):
+            continue
+        if any(pattern.search(compact) for pattern in MATERIAL_EVENT_PATTERNS):
+            accepted.append(context)
+    return accepted
+
+
 def publication_rejection_reason(
     lead: dict[str, Any], policy: PublisherPolicy
 ) -> str | None:
@@ -116,12 +186,12 @@ def publication_rejection_reason(
     if publisher_for_domain(host, policy) is None:
         return "来源不在具名媒体白名单"
 
-    contexts = relevant_contexts(
-        str(lead.get("title") or ""),
-        str(lead.get("snippet") or ""),
-    )
+    if not company_identity_present(lead):
+        return "媒体内容与上市公司身份不一致"
+
+    contexts = material_derivative_event_contexts(lead)
     if not contexts:
-        return "未找到同一语境内已发生的衍生品风险"
+        return "未找到具备重要性的已发生衍生品不利事实"
     return None
 
 
@@ -217,9 +287,7 @@ def _source_key(url: str) -> str:
 
 
 def _attributed_excerpt(lead: dict[str, Any], publisher_name: str) -> str:
-    contexts = relevant_contexts(
-        str(lead.get("title") or ""), str(lead.get("snippet") or "")
-    )
+    contexts = material_derivative_event_contexts(lead)
     context = contexts[0] if contexts else str(lead.get("title") or "").strip()
     return f"据{publisher_name}报道：{context}"[:500]
 
@@ -277,33 +345,50 @@ def publish_candidates(
     lead_updates: list[dict[str, Any]] = []
     rejections: dict[str, str] = {}
     working_reports = [dict(report) for report in existing_reports]
+    existing_report_keys = {
+        str(report.get("media_key") or "") for report in existing_reports
+    }
+    known_report_keys = set(existing_report_keys)
+    linked_decisions: dict[str, list[bool]] = {}
     known_source_keys: set[str] = set()
 
     for lead in leads:
         lead_key = str(lead.get("lead_key") or "")
+        linked_media_key = str(
+            (lead.get("raw_metadata") or {}).get("public_media_key") or ""
+        )
         if lead.get("official_corroborated") or lead.get("status") == "corroborated":
             rejections[lead_key] = "已进入官方案例路径"
+            if linked_media_key:
+                linked_decisions.setdefault(linked_media_key, []).append(False)
             continue
         if lead.get("status") == "dismissed":
             rejections[lead_key] = "线索已排除"
+            if linked_media_key:
+                linked_decisions.setdefault(linked_media_key, []).append(False)
             continue
 
         reason = publication_rejection_reason(lead, policy)
         if reason:
             rejections[lead_key] = reason
+            if linked_media_key:
+                linked_decisions.setdefault(linked_media_key, []).append(False)
             continue
+        if linked_media_key:
+            linked_decisions.setdefault(linked_media_key, []).append(True)
         publisher_name = publisher_for_domain(lead.get("source_domain"), policy)
         if publisher_name is None:
             rejections[lead_key] = "缺少具名媒体来源"
             continue
 
-        media_key = find_matching_report(lead, working_reports)
-        is_new_report = media_key is None
+        media_key = linked_media_key or find_matching_report(lead, working_reports)
+        is_new_report = not media_key or media_key not in known_report_keys
         media_key = media_key or _media_key(lead_key)
         report, source = prepare_public_rows(lead, publisher_name, media_key)
         if is_new_report:
             reports.append(report)
             working_reports.append(report)
+            known_report_keys.add(media_key)
         if source["source_key"] not in known_source_keys:
             sources.append(source)
             known_source_keys.add(source["source_key"])
@@ -312,7 +397,14 @@ def publish_candidates(
         raw_metadata["public_media_key"] = media_key
         lead_updates.append({"lead_key": lead_key, "raw_metadata": raw_metadata})
 
-    return PublicationBatch(reports, sources, lead_updates, rejections)
+    report_updates = [
+        {"media_key": media_key, "publish_status": "dismissed"}
+        for media_key, decisions in sorted(linked_decisions.items())
+        if media_key in existing_report_keys and decisions and not any(decisions)
+    ]
+    return PublicationBatch(
+        reports, sources, lead_updates, rejections, report_updates
+    )
 
 
 def persist_batch(batch: PublicationBatch, sb_upsert, sb_request) -> tuple[int, int]:
@@ -328,6 +420,14 @@ def persist_batch(batch: PublicationBatch, sb_upsert, sb_request) -> tuple[int, 
             "risk_media_leads",
             params={"lead_key": f"eq.{update['lead_key']}"},
             json_body={"raw_metadata": update["raw_metadata"]},
+            extra_headers={"Prefer": "return=minimal"},
+        )
+    for update in batch.report_updates:
+        sb_request(
+            "PATCH",
+            "risk_media_reports",
+            params={"media_key": f"eq.{update['media_key']}"},
+            json_body={"publish_status": update["publish_status"]},
             extra_headers={"Prefer": "return=minimal"},
         )
     return report_count, source_count
@@ -405,7 +505,8 @@ def run_publication(
     log(
         "公开媒体筛选完成："
         f"候选线索 {len(leads)}，新报告 {len(batch.reports)}，"
-        f"来源 {len(batch.sources)}，排除 {len(batch.rejections)}"
+        f"来源 {len(batch.sources)}，排除 {len(batch.rejections)}，"
+        f"撤回 {len(batch.report_updates)}"
     )
     if write:
         report_count, source_count = persist_batch(batch, sb_upsert, sb_request)
