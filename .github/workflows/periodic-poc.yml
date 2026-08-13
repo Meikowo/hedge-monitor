@@ -35,6 +35,9 @@ on:
         required: false
         default: ''
   schedule:
+    # 每天北京时间 05:20：只更新 2025 年报元数据
+    - cron: '20 21 * * *'
+    # 每天北京时间 00:45、06:45、12:45、18:45：定位与抽取队列
     - cron: '45 22,4,10,16 * * *'
 
 concurrency:
@@ -97,24 +100,24 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/periodic_progress.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual
       - name: Auto-discover formal reports (no LLM)
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && github.event.schedule == '20 21 * * *'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/fetch_periodic_reports.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --strategy full --write
       - name: Auto-locate formal reports (no LLM)
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && github.event.schedule == '45 22,4,10,16 * * *'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/locate_periodic_pages.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --limit 48 --write
       - name: Auto-extract formal reports (LLM)
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && github.event.schedule == '45 22,4,10,16 * * *'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-        run: python scripts/extract_periodic_reports.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --limit 18 --confirm-llm
+        run: python scripts/extract_periodic_reports.py --sample "$SAMPLE_FILE" --fiscal-year 2025 --report-type annual --limit 36 --confirm-llm
       - name: Report formal progress after batch
         if: github.event_name == 'schedule' && always()
         env:

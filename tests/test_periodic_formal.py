@@ -359,17 +359,43 @@ class PeriodicFormalWorkflowTest(unittest.TestCase):
         job = workflow["jobs"]["periodic-poc"]
         steps = {step.get("name"): step for step in job["steps"] if step.get("name")}
 
-        self.assertEqual(triggers["schedule"], [{"cron": "45 22,4,10,16 * * *"}])
+        self.assertEqual(
+            triggers["schedule"],
+            [
+                {"cron": "20 21 * * *"},
+                {"cron": "45 22,4,10,16 * * *"},
+            ],
+        )
         self.assertEqual(job["timeout-minutes"], 330)
         self.assertIn("formal1812", dispatch["inputs"]["sample_set"]["options"])
         self.assertIn("report_id", dispatch["inputs"])
         self.assertIn("config/annual_formal_2025.csv", job["env"]["SAMPLE_FILE"])
         self.assertIn("--strategy full", steps["Auto-discover formal reports (no LLM)"]["run"])
         self.assertIn("--limit 48 --write", steps["Auto-locate formal reports (no LLM)"]["run"])
-        self.assertIn("--limit 18 --confirm-llm", steps["Auto-extract formal reports (LLM)"]["run"])
+        self.assertIn("--limit 36 --confirm-llm", steps["Auto-extract formal reports (LLM)"]["run"])
         self.assertNotIn("--retry-failed", steps["Auto-locate formal reports (no LLM)"]["run"])
         self.assertIn("periodic_progress.py", steps["Report formal progress before batch"]["run"])
         self.assertIn("periodic_progress.py", steps["Report formal progress after batch"]["run"])
+        self.assertIn(
+            "20 21 * * *",
+            steps["Auto-discover formal reports (no LLM)"]["if"],
+        )
+        self.assertNotIn(
+            "20 21 * * *",
+            steps["Auto-locate formal reports (no LLM)"]["if"],
+        )
+        self.assertNotIn(
+            "20 21 * * *",
+            steps["Auto-extract formal reports (LLM)"]["if"],
+        )
+        self.assertIn(
+            "45 22,4,10,16 * * *",
+            steps["Auto-locate formal reports (no LLM)"]["if"],
+        )
+        self.assertIn(
+            "45 22,4,10,16 * * *",
+            steps["Auto-extract formal reports (LLM)"]["if"],
+        )
 
     def test_manual_report_id_is_forwarded_only_by_explicit_dispatch(self):
         workflow = yaml.safe_load(
