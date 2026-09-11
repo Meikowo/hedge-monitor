@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import fitz
 
-LOCATOR_VERSION = "v2.3"
+LOCATOR_VERSION = "v2.4"
 MAX_CANDIDATE_PAGES = 15
 MAX_MARKED_CHARS = 26000
 TABLE_CONTROLLED_METRICS = {
@@ -283,8 +283,20 @@ def merge_derivative_continuation(
     table_top: float,
 ) -> list[list[str | None]]:
     """把上一页的标准衍生品表头接到紧邻下一页的续表数据前。"""
+    # An adjacent page is not necessarily a continuation. A new table with its
+    # own headers must never inherit the previous derivative table's columns.
+    first_cells = [re.sub(r"\s+", "", str(row[0] or "")) for row in rows if row]
+    is_business_row = any(
+        re.search(r"衍生|期货|期权|远期|掉期|互换|(?:外汇|汇率|货币|利率).*合约|T\+D", label)
+        for label in first_cells
+    )
+    same_width = bool(prior_header_rows) and all(
+        len(row) == len(prior_header_rows[0]) for row in rows
+    )
     if (
         prior_header_rows
+        and is_business_row
+        and same_width
         and prior_page == page - 1
         and table_top < 350
         and not _is_derivative_investment_header(rows)
@@ -639,7 +651,21 @@ def select_candidate_pages(
             scores[idx] = score
 
     ranked = sorted(scores, key=lambda p: (-scores[p], p))
+    # Concrete investment tables and actual-P&L explanations can score lower
+    # than repeated risk/policy prose. Reserve one of each before neighbours,
+    # keeping the existing 15-page budget and financial-note coverage groups.
     mandatory: list[int] = []
+    anchor_terms = (
+        ('衍生品投资类', '本期公允价值变动损益'),
+        ('报告期实际损益情况',),
+    )
+    for terms in anchor_terms:
+        anchors = [p for p, text in enumerate(pages, 1)
+                   if all(term in re.sub(r'\s+', '', text) for term in terms)]
+        if anchors:
+            winner = min(anchors, key=lambda p: (-scores.get(p, 0), p))
+            if winner not in mandatory:
+                mandatory.append(winner)
     for group in group_scores:
         candidates = group_scores[group]
         if group in REQUIRE_ALL_COVERAGE_TERMS:

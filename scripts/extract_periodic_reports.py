@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cninfo
 import prompt_periodic as pp
+from metric_evidence import is_authorization_peak
 from common import ROOT, env, log, sb_delete, sb_insert, sb_select, sb_update, sb_upsert, snapshot_json, validate_report_ids, warn
 from extract_announcements import call_llm, verify_quote
 from periodic_pdf import (
@@ -866,6 +867,8 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         )
         if metric_type not in METRICS:
             continue
+        if metric_type in {'oci_amount', 'reclassification_amount'} and '外币财务报表折算' in quote:
+            continue
         derivative_context = " ".join((quote, source_section, account_name))
         if (
             metric_type == "derivative_disposal_investment_income"
@@ -888,6 +891,10 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
             ):
                 continue
         value, unit = restore_literal_scale(value, raw_item.get("unit"), quote)
+        if metric_type in {'margin_peak_reported', 'notional_peak_reported', 'option_premium_usage_peak'}:
+            # Match the source literal after undoing model unit conversions.
+            if is_authorization_peak(quote, value):
+                continue
         value_verified = verify_raw_value(value, quote)
         if float(value) == 0 and not zero_literal_matches_unit(unit, quote):
             value_verified = False

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """定期报告套保披露结构化提示词。"""
 
-PROMPT_VERSION = "periodic-v2.4-reviewed-boundaries"
+PROMPT_VERSION = "periodic-v2.5-actual-vs-authorization"
 
 METRIC_FAMILIES = {
     "operations": (
@@ -39,6 +39,7 @@ METRIC_FAMILY_GUIDANCE = {
 - ending_balance：表格直接披露的期末投资金额或期末余额，不等同于公允价值净额。
 - net_asset_ratio：期末投资金额占净资产比例。
 - notional_end_reported / notional_peak_reported：仅限原文明示的期末/期间最高名义本金。
+- “拟开展/获批/不超过”的计划授权上限不是实际期间峰值，不能提取为实际名义本金。
 - contract_quantity_end：期末合约数量（吨、手等）。
 """,
     "pnl": """
@@ -49,6 +50,7 @@ METRIC_FAMILY_GUIDANCE = {
 - 仅出现“衍生金融工具公允价值变动”不能单独证明属于套期保值实际损益；若报告没有
   实际套保业务范围、工具或目的证据，保留事实但将披露判断交由复核。
 - oci_amount：其他综合收益或套期储备中明确归属于套期会计/衍生工具的金额。
+- 外币财务报表折算差额不是衍生品或套期储备金额，排除。
 - reclassification_amount：套期储备重分类进损益或资产成本的金额。
 - 报表中的“—”或“-”表示无金额，不得输出为0；只有原文数字0才能输出0。
 """,
@@ -59,6 +61,7 @@ METRIC_FAMILY_GUIDANCE = {
 - 黄金租赁保证金、租借黄金质押款属于租赁/融资担保时，不得作为衍生品保证金；
   只有明确写明期货、期权、远期、掉期、互换、结售汇或 T+D 交易保证金时才记录。
 - margin_peak_reported：仅限原文明示的报告期最高/最大/任意时点最高保证金；不得标成名义本金。
+- 必须是已发生的最高占用；“任意时点不超过/获批/拟开展”的授权上限不得作为实际峰值。
 - collateral_end_fair_value：期末抵押品公允价值。
 - credit_facility_used_end / option_premium_usage_peak：期末已用授信/期间最高权利金占用。
 """,
