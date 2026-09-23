@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cninfo
-from common import OUTPUT_DIR, ROOT, log, sb_select, sb_update, snapshot_json, warn
+from common import OUTPUT_DIR, ROOT, log, sb_select, sb_update, snapshot_json, validate_report_ids, warn
 from periodic_pdf import LOCATOR_VERSION, locate_pdf
 
 
@@ -37,8 +37,10 @@ def build_report_query(
         "fiscal_year": f"eq.{fiscal_year}",
         "report_type": f"eq.{report_type}",
     }
-    if report_ids:
-        params["report_id"] = f"in.({','.join(report_ids)})"
+    validated_ids = validate_report_ids(report_ids)
+    if validated_ids:
+        params.pop("limit")
+        params["report_id"] = f"in.({','.join(validated_ids)})"
     else:
         params["status"] = (
             "in.(discovered,failed)" if retry_failed else "eq.discovered"

@@ -11,7 +11,7 @@ try:
 except ImportError:  # Direct script execution by the audit CLI.
     from metric_evidence import is_authorization_peak
 
-RULE_VERSION = 'm5-poc-v1'
+RULE_VERSION = 'm5-poc-v1.1'
 FACT_BASIS = {
     'margin_end_cash': ('保证金占用', 'period_end'),
     'margin_peak_reported': ('保证金占用', 'period_peak'),
@@ -62,6 +62,17 @@ def compact(value):
     return re.sub(r'\s+', '', value or '')
 
 
+def is_authorization_candidate(plan):
+    """An extracted role cannot turn an opinion/feasibility document into a plan.
+
+    This is an exclusion guard, not proof of approval or effective dates.
+    Original extraction rows remain untouched.
+    """
+    return (plan.get('ann_role') in ('计划-董事会', '计划-股东大会')
+            and not re.search(r'核查(?:意见|报告)|法律意见|独立意见|可行性|管理制度|风险提示',
+                              compact(plan.get('title'))))
+
+
 def explicit_period(plan):
     text = compact(plan.get('period_text'))
     quote = compact(plan.get('period_quote'))
@@ -104,7 +115,7 @@ def compare_numeric(report, metric, plans, report_scopes):
     if scope not in {'商品', '外汇', '利率'}:
         return out('scope_uncertain')
     candidates = [p for p in plans if p.get('code') == report.get('code')
-                  and p.get('ann_role') in ('计划-董事会', '计划-股东大会')]
+                  and is_authorization_candidate(p)]
     if not candidates:
         return out('no_plan')
     candidates = [p for p in candidates if p.get('basis') == spec[0]

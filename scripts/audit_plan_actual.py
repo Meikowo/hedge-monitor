@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import ROOT, log, sb_select, snapshot_json
-from plan_actual_rules import FACT_BASIS, RULE_VERSION, canonical_reports, compare_names, compare_numeric, overall_status
+from plan_actual_rules import FACT_BASIS, RULE_VERSION, canonical_reports, compare_names, compare_numeric, overall_status, is_authorization_candidate
 
 
 def build_audit(data):
@@ -24,9 +24,11 @@ def build_audit(data):
         profile = profiles.get(report['report_id'], {})
         report_scopes = profile.get('scopes') or []
         facts = [m for m in data['metrics'] if m['report_id'] == report['report_id']]
-        plans = [p for p in data['plans'] if p['code'] == report['code']
-                 and p.get('ann_date') and p['ann_date'] <= report['period_end']
-                 and p.get('ann_role') in ('计划-董事会', '计划-股东大会')]
+        source_plans = [p for p in data['plans'] if p['code'] == report['code']
+                        and p.get('ann_date') and p['ann_date'] <= report['period_end']]
+        plans = [p for p in source_plans if is_authorization_candidate(p)]
+        excluded_plans = [dict(p, exclusion_reason='非实际计划类来源，不贡献授权')
+                          for p in source_plans if not is_authorization_candidate(p)]
         for scope in report_scopes or ['未明确']:
             scoped_plans = [p for p in plans if p.get('scope') in (scope, '综合', None)]
             # Never copy report-wide lists to each scope of a mixed report.
@@ -55,7 +57,7 @@ def build_audit(data):
             if report.get('status') != 'extracted' or not profile:
                 status = 'unprocessed'
             rows.append({'code':report['code'],'name':report.get('name'), 'scope':scope,
-                         'report':report,'profile':profile,'plans':scoped_plans,
+                         'report':report,'profile':profile,'plans':scoped_plans,'excluded_plans':excluded_plans,
                          'underlyings':underlyings,'instruments':instruments,'venue':venue,
                          'numeric':numeric,'status':status,'requires_review':True,
                          'rule_version':RULE_VERSION})

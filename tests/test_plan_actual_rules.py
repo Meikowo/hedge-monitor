@@ -104,6 +104,18 @@ class NumericRulesTest(unittest.TestCase):
             self.assertEqual(self.check(plans=[plan(period_text=period, period_quote=period)])['status'], 'period_unknown')
         self.assertEqual(self.check(plans=[plan(period_quote_verified=False)])['status'], 'period_unknown')
 
+    def test_third_party_opinion_cannot_supply_authorization_despite_wrong_role(self):
+        for title in ['中德证券关于大北农开展套期保值业务的核查意见',
+                      '关于套期保值事项的法律意见书', '关于开展套期保值的可行性分析报告',
+                      '关于套期保值的可行性研究报告', '保荐人关于套期保值的专项核查报告',
+                      '关于套期保值业务的风险提示公告']:
+            self.assertEqual(self.check(plans=[plan(title=title)])['status'], 'no_plan')
+        valid = plan(title='关于开展商品期货套期保值业务的公告')
+        opinion = plan(id=3, title='保荐机构关于开展套期保值的核查意见', amount=50000000)
+        result = self.check(plans=[valid, opinion])
+        self.assertEqual(result['status'], 'within_snapshot')
+        self.assertEqual(result['source_quota_ids'], [2])
+
     def test_cross_year_period_and_conflicts_are_not_latest_or_max(self):
         period = '自2024年12月1日起至2026年1月31日'
         self.assertEqual(self.check(plans=[plan(period_text=period, period_quote=period)])['status'], 'within_snapshot')

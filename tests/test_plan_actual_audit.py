@@ -41,6 +41,31 @@ class AuditAdapterTest(unittest.TestCase):
         self.assertNotIn('<script>',html)
         self.assertIn('&lt;script&gt;',html)
 
+    def test_third_party_source_excluded_from_names_and_numeric_candidates(self):
+        data = self.payload()
+        data['profiles'][0]['scopes'] = ['商品']
+        data['profiles'][0]['underlyings'] = ['铜']
+        data['plans'] = [{'code':'000001','ann_id':'opinion','ann_date':'2025-04-01',
+                         'scope':'商品','extraction_scopes':['商品'],'ann_role':'计划-董事会',
+                         'title':'中德证券关于开展套期保值业务的核查意见','underlyings':['铜']}]
+        row = audit().build_audit(data)[0]
+        self.assertEqual(row['plans'], [])
+        self.assertEqual(row['underlyings']['status'], 'insufficient_evidence')
+        self.assertEqual(row['excluded_plans'][0]['ann_id'], 'opinion')
+
+    def test_feasibility_and_verification_report_variants_not_plan_dimensions(self):
+        for title in ['关于开展套保的可行性研究报告', '保荐机构关于套保的专项核查报告']:
+            data = self.payload()
+            data['profiles'][0]['scopes'] = ['商品']
+            data['profiles'][0]['underlyings'] = ['铜']
+            data['plans'] = [{'code':'000001','ann_id':'report','ann_date':'2025-04-01',
+                             'scope':'商品','extraction_scopes':['商品'],'ann_role':'计划-董事会',
+                             'title':title,'underlyings':['铜']}]
+            row = audit().build_audit(data)[0]
+            self.assertEqual(row['plans'], [])
+            self.assertEqual(row['underlyings']['status'], 'insufficient_evidence')
+            self.assertEqual(len(row['excluded_plans']), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

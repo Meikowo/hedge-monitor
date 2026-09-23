@@ -45,13 +45,32 @@ def build_missing_company_rows(
 
 
 def is_target_title(title: str, fiscal_year: int, report_type: str) -> bool:
-    title = title or ""
+    title = re.sub(r"[\s_]", "", title or "")
     period_word = "年度报告" if report_type == "annual" else "半年度报告"
     period_pattern = rf"{fiscal_year}年?{period_word}"
     return (
         re.search(period_pattern, title) is not None
-        and not re.search(r"摘要|英文版|取消|提示性公告", title)
+        and not re.search(r"摘要|英文|English|简版|取消|提示性公告", title, re.I)
     )
+
+
+def build_report_code_aliases(sample: dict, org_map: dict[str, str]) -> dict[str, str]:
+    """Preserve fixed-pool BSE codes using unique, official org-ID equivalence.
+
+    No name matching and no A/B-share or merger identity inference. The returned
+    mapping is source (920xxx) code -> existing target-pool (4/8xxxxx) code.
+    """
+    targets_by_org: dict[str, list[str]] = {}
+    for code in sample:
+        org = org_map.get(code)
+        if org and re.fullmatch(r"[48]\d{5}", code):
+            targets_by_org.setdefault(org, []).append(code)
+    aliases = {}
+    for source_code, org in org_map.items():
+        targets = targets_by_org.get(org, [])
+        if re.fullmatch(r"920\d{3}", source_code) and source_code not in sample and len(targets) == 1:
+            aliases[source_code] = targets[0]
+    return aliases
 
 
 def choose_canonical_reports(rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -145,14 +164,17 @@ def main() -> None:
     ap.add_argument("--write", action="store_true", help="确认写入 periodic_reports")
     args = ap.parse_args()
 
-    sample = load_sample(args.sample)
+    full_sample = load_sample(args.sample)
+    sample = full_sample
     if args.only_code:
         sample = {k: v for k, v in sample.items() if k == args.only_code.zfill(6)}
     publish_year = args.fiscal_year + 1 if args.report_type == "annual" else args.fiscal_year
     date_window = f"{publish_year}-01-01~{publish_year}-12-31"
     found: dict[str, dict] = {}
     log(f"扫描巨潮 {date_window}，目标 {len(sample)} 家，策略={args.strategy}（只取完整报告，不取摘要）")
-    org_map = cninfo.stock_org_map() if args.strategy == "targeted" else {}
+    org_map = cninfo.stock_org_map()
+    # Filtering one target must not change issuer identity or hide ambiguity.
+    code_aliases = build_report_code_aliases(full_sample, org_map)
     if args.strategy == "full":
         query_streams = [(
             None,
@@ -181,7 +203,8 @@ def main() -> None:
     for query_code, raw_rows in query_streams:
         for raw in raw_rows:
             rec = cninfo.normalize(raw, source=f"cninfo:{CATEGORY[args.report_type]}")
-            code = rec.get("code")
+            source_code = rec.get("code")
+            code = code_aliases.get(source_code, source_code)
             if code not in sample or not is_target_title(rec.get("title") or "", args.fiscal_year, args.report_type):
                 continue
             period = f"{args.fiscal_year}FY" if args.report_type == "annual" else f"{args.fiscal_year}H1"
@@ -193,7 +216,9 @@ def main() -> None:
                 "publish_date": rec.get("ann_date"), "adjunct_url": rec.get("adjunct_url"),
                 "pdf_url": rec.get("pdf_url"),
                 "is_revised": bool(re.search(r"修订|更正", rec["title"])),
-                "source": f"cninfo:{CATEGORY[args.report_type]}",
+                "source": (f"cninfo:{CATEGORY[args.report_type]}"
+                           + (f";reported_code={source_code};org_id={org_map[source_code]}"
+                              if source_code != code else "")),
             }
             found[row["report_id"]] = row
         if query_code:
