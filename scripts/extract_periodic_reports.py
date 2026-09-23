@@ -89,6 +89,12 @@ def normalize_summary(
             else ""
         )
         return f"报告期未发现衍生品业务披露{accounting_text}。"
+    if accounting_status in {"未明确披露", "需复核"} and any(
+        marker in text for marker in ("套期会计", "现金流量套期", "公允价值套期", "境外经营净投资套期")
+    ):
+        scope_text = "、".join(scopes)
+        subject = f"{scope_text}衍生品业务" if scope_text else "衍生品业务"
+        return f"报告期披露{subject}；套期会计应用情况{accounting_status}。"
     applied_claims = ("采用套期会计", "应用套期会计", "套期会计核算")
     if accounting_status != "未应用" or not any(x in text for x in applied_claims):
         return text[:300] or None
@@ -221,6 +227,13 @@ def extract_explicit_pnl_metrics(body: str) -> list[dict]:
         r"(?P<value>[-−]?\s*[0-9][0-9,]*(?:\.[0-9]+)?)\s*"
         r"(?P<unit>亿美元|万美元|美元|亿元|万元|千元|元))"
     )
+    total_pattern = re.compile(
+        r"(?P<raw>(?:计入报告期内的|报告期末[，,]因)"
+        r"(?P<label>[^。；;]{0,48}?(?:衍生品|期货交易))"
+        r"(?:损益|产生的投资收益与公允价值变动损益及浮动损益)合计为"
+        r"(?P<value>[-−]?[0-9][0-9,]*(?:\.[0-9]+)?)"
+        r"(?P<unit>亿美元|万美元|美元|亿元|万元|千元|元))"
+    )
     for page_match in page_blocks:
         page = int(page_match.group("page"))
         page_body = page_match.group("body")
@@ -229,20 +242,30 @@ def extract_explicit_pnl_metrics(body: str) -> list[dict]:
             "",
             page_body,
         )
-        for match in pnl_pattern.finditer(page_body):
+        compact_page_body = re.sub(r'\s+', '', page_body)
+        for match in [*pnl_pattern.finditer(page_body),
+                      *total_pattern.finditer(compact_page_body)]:
+            if match.re is total_pattern:
+                # Do not discard a forecast/negation prefix just because the
+                # amount pattern begins later in the same sentence.
+                start = max(compact_page_body.rfind(mark, 0, match.start())
+                            for mark in ('。', '；', ';')) + 1
+                sentence = compact_page_body[start:match.end()]
+                if re.search(r'预计|预期|预测|假设|可能|预算|非(?:商品|金融)?衍生品', sentence):
+                    continue
             value = float(
                 match.group("value").replace("−", "-").replace(" ", "").replace(",", "")
             )
             unit = match.group("unit")
             label = match.group("label")
-            if "商品" in label:
-                scope = "商品"
-            elif "外汇" in label or "汇率" in label:
-                scope = "外汇"
-            elif "利率" in label:
-                scope = "利率"
-            else:
-                scope = None
+            scopes = []
+            if "商品" in label or "期货" in label:
+                scopes.append("商品")
+            if "外汇" in label or "汇率" in label:
+                scopes.append("外汇")
+            if "利率" in label:
+                scopes.append("利率")
+            scope = scopes[0] if len(scopes) == 1 else None
             metrics.append({
                 "metric_type": "reported_derivative_comprehensive_pnl",
                 "fact_level": "scope" if scope else "report",
