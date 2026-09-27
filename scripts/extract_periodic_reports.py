@@ -243,6 +243,45 @@ def extract_explicit_pnl_metrics(body: str) -> list[dict]:
             page_body,
         )
         compact_page_body = re.sub(r'\s+', '', page_body)
+        # These are directly disclosed totals, not arithmetic reconstructions.
+        # Keep derivative totals separate from any following exchange loss.
+        number = r"[0-9][0-9,]*(?:\.[0-9]+)?"
+        unit_pattern = r"(?:亿元|万元|千元|元)人民币"
+        loss_patterns = (
+            (None, rf"衍生金融工具公允价值变动(?:损失|收益)为{number}{unit_pattern}，"
+             rf"投资收益为{number}{unit_pattern}，两者合计"
+             rf"(?P<sign>损失|收益)为(?P<value>{number})(?P<unit>亿元|万元|千元|元)人民币"),
+            ("外汇", rf"外汇相关的衍生品投资活动净(?P<sign>损失|收益)为"
+             rf"(?P<value>{number})(?P<unit>亿元|万元|千元|元)人民币"),
+        )
+        for scope, pattern in loss_patterns:
+            for match in re.finditer(pattern, compact_page_body):
+                start = max(compact_page_body.rfind(mark, 0, match.start())
+                            for mark in ('。', '；', ';')) + 1
+                heading = '报告期实际损益情况的说明'
+                heading_start = compact_page_body.rfind(heading, start, match.start())
+                if heading_start >= 0:
+                    start = heading_start + len(heading)
+                end = min([pos for mark in ('。', '；', ';')
+                           if (pos := compact_page_body.find(mark, match.end())) >= 0]
+                          or [len(compact_page_body)])
+                sentence = compact_page_body[start:end]
+                if re.search(r'预计|预期|预测|假设|可能|预算|上年|上期|上一|去年|非(?:商品|金融)?衍生', sentence):
+                    continue
+                value = float(match.group('value').replace(',', ''))
+                metrics.append({
+                    'metric_type': 'reported_derivative_comprehensive_pnl',
+                    'fact_level': 'scope' if scope else 'report',
+                    'scope': scope,
+                    'underlying': None,
+                    'value': -value if match.group('sign') == '损失' else value,
+                    'currency': 'CNY',
+                    'unit': match.group('unit'),
+                    'time_basis': 'period',
+                    'source_section': '报告期实际损益情况',
+                    'raw': sentence[:match.end() - start],
+                    'page': page,
+                })
         for match in [*pnl_pattern.finditer(page_body),
                       *total_pattern.finditer(compact_page_body)]:
             if match.re is total_pattern:
@@ -477,33 +516,39 @@ def merge_pass_results(profile: dict, metric_results: dict[str, dict]) -> dict:
     return merged
 
 
+def current_no_derivative_phrase(body: str) -> str | None:
+    """Do not apply a prior-period or subsidiary-only denial to the whole report."""
+    compact = re.sub(r'\s+', '', body or '')
+    for match in re.finditer(r'(?:本)?报告期(?:内)?不存在衍生品投资', compact):
+        start = max(compact.rfind(mark, 0, match.start()) for mark in ('。', '；', ';', '】')) + 1
+        prefix = compact[start:match.start()]
+        if re.search(r'上一|上年|上期|去年|以前|子公司|母公司|本部', prefix):
+            continue
+        if re.search(r'20\d{2}年(?:度)?(?:本公司|公司|本集团|集团)?$', prefix):
+            continue
+        return match.group(0)
+    return None
+
+
 def normalize_accounting_items(result: dict, body: str) -> list[dict]:
-    no_derivative_phrase = next(
-        (
-            phrase for phrase in (
-                "报告期不存在衍生品投资",
-                "报告期内不存在衍生品投资",
-                "本报告期不存在衍生品投资",
-            )
-            if phrase in (body or "")
-        ),
-        None,
-    )
+    no_derivative_phrase = current_no_derivative_phrase(body)
     if no_derivative_phrase:
         page, quote = find_page_evidence(body, no_derivative_phrase)
+        _, verified_metrics = normalize(result, body)
+        conflicting = bool(verified_metrics)
         return [{
             "scope": None,
             "instrument": None,
             "underlying_asset": None,
-            "application_status": "未应用",
+            "application_status": "需复核" if conflicting else "未应用",
             "accounting_type": None,
-            "non_application_reason": "报告期不存在衍生品投资",
+            "non_application_reason": None if conflicting else "报告期不存在衍生品投资",
             "source_section": "衍生品投资情况",
             "page": page,
             "quote": quote,
             "quote_verified": True,
             "confidence": 1.0,
-            "need_review": False,
+            "need_review": conflicting,
         }]
     items: list[dict] = []
     for raw_item in result.get("hedge_accounting_items") or []:
@@ -783,17 +828,7 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         if cash_flow_page:
             accounting_page = cash_flow_page
             accounting_quote = cash_flow_quote
-    no_derivative_phrase = next(
-        (
-            phrase for phrase in (
-                "报告期不存在衍生品投资",
-                "报告期内不存在衍生品投资",
-                "本报告期不存在衍生品投资",
-            )
-            if phrase in (body or "")
-        ),
-        None,
-    )
+    no_derivative_phrase = current_no_derivative_phrase(body)
     if (
         status == "未提及"
         and no_derivative_phrase
@@ -851,6 +886,8 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         "model": env("LLM_MODEL", "MiniMax-M3"), "prompt_version": pp.PROMPT_VERSION,
         "extracted_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
+    if no_derivative_phrase:
+        top["summary"] = "报告期不存在衍生品投资；未应用套期会计。"
     has_verified_business_table = any(
         isinstance(item, dict)
         and item.get("table_cell_verified") is True
@@ -890,8 +927,19 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         )
         if metric_type not in METRICS:
             continue
-        if metric_type in {'oci_amount', 'reclassification_amount'} and '外币财务报表折算' in quote:
-            continue
+        value, unit = restore_literal_scale(value, raw_item.get("unit"), quote)
+        if metric_type in {'oci_amount', 'reclassification_amount'}:
+            # Require attribution in the source quote, not a model-supplied
+            # account/section label: total OCI also includes non-derivative items.
+            clauses = [clause for clause in re.split(r'[。；;]', quote)
+                       if verify_raw_value(value, clause)]
+            if not clauses or not all(
+                '外币财务报表折算' not in clause
+                and any(term in clause for term in (
+                    '衍生', '套期', '套保', '期货', '期权', '远期', '掉期', '互换',
+                )) for clause in clauses
+            ):
+                continue
         derivative_context = " ".join((quote, source_section, account_name))
         if (
             metric_type == "derivative_disposal_investment_income"
@@ -913,7 +961,6 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
                 )
             ):
                 continue
-        value, unit = restore_literal_scale(value, raw_item.get("unit"), quote)
         if metric_type in {'margin_peak_reported', 'notional_peak_reported', 'option_premium_usage_peak'}:
             # Match the source literal after undoing model unit conversions.
             if is_authorization_peak(quote, value):
@@ -995,6 +1042,13 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         seen_metrics.add(key)
         deduplicated.append(item)
     metrics = deduplicated
+    if no_derivative_phrase and metrics:
+        top.update({
+            "disclosure_status": "需复核", "hedge_accounting_status": "需复核",
+            "hedge_accounting": [], "hedge_accounting_types": [],
+            "non_application_reason": None,
+            "summary": "报告中的无衍生品投资说明与数值披露存在冲突，需复核。",
+        })
     if metrics and top["disclosure_status"] in {"提及无数值", "未提及"}:
         has_profile_hedge_context = bool(top["scopes"] or top["purpose"])
         top["disclosure_status"] = "有数值" if (
