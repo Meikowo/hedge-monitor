@@ -46,6 +46,8 @@ POLICY_ONLY_ACCOUNTING_MARKERS = (
     "本公司的套期包括",
     "本公司套期包括",
     "本集团的套期主要包括",
+    "本集团的套期业务分为",
+    "对拟开展的",
     "套期会计方法包括",
     "套期分为",
     "除现金流量套期中属于套期有效的部分",
@@ -765,6 +767,7 @@ def promote_verified_accounting_evidence(
         (
             item for item in accounting_items
             if item.get("application_status") == target_status
+            and not item.get("scope")
             and item.get("quote_verified") is True
             and item.get("quote")
         ),
@@ -790,7 +793,7 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
     accounting_status = result.get("hedge_accounting_status")
     if accounting_status not in HEDGE_ACCOUNTING_STATUS:
         accounting_status = "已应用" if accounting_types else "未明确披露"
-    if accounting_status in {"未应用", "未明确披露"}:
+    if accounting_status in {"未应用", "未明确披露", "需复核"}:
         legacy_accounting = []
         accounting_types = []
     accounting_evidence = result.get("hedge_accounting_evidence")
@@ -859,12 +862,17 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         result = {**result, "non_application_reason": None}
     normalized_scopes = [x for x in _list(result.get("scopes")) if x in SCOPES]
     non_application_reason = result.get("non_application_reason") or None
+    if non_application_reason in {"原文明示原因", "原文明确原因"}:
+        non_application_reason = None
+    purpose = result.get("purpose") or None
+    if purpose in {"原文明确目的", "原文明示目的"}:
+        purpose = None
     top = {
         "disclosure_status": status,
         "scopes": normalized_scopes,
         "instruments": _list(result.get("instruments")),
         "underlyings": _list(result.get("underlyings")),
-        "purpose": (result.get("purpose") or None),
+        "purpose": purpose,
         "hedge_accounting": legacy_accounting or accounting_types,
         "hedge_accounting_status": accounting_status,
         "hedge_accounting_types": accounting_types,
@@ -928,6 +936,14 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         if metric_type not in METRICS:
             continue
         value, unit = restore_literal_scale(value, raw_item.get("unit"), quote)
+        if (metric_type in {'derivative_asset_fv', 'derivative_liability_fv'}
+                and raw_item.get('table_cell_verified') is not True):
+            # An investment/net-balance row is not a gross asset/liability.
+            # Require the relevant side in the source quote, not a model label.
+            side = '资产' if metric_type == 'derivative_asset_fv' else '负债'
+            other_side = '负债' if side == '资产' else '资产'
+            if side not in quote or other_side in quote:
+                continue
         if metric_type in {'oci_amount', 'reclassification_amount'}:
             # Require attribution in the source quote, not a model-supplied
             # account/section label: total OCI also includes non-derivative items.

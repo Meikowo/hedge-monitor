@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import fitz
 
-LOCATOR_VERSION = "v2.4"
+LOCATOR_VERSION = "v2.5"
 MAX_CANDIDATE_PAGES = 15
 MAX_MARKED_CHARS = 26000
 TABLE_CONTROLLED_METRICS = {
@@ -111,6 +111,21 @@ def find_parent_company_note_start(pages: list[str]) -> int | None:
         if "母公司财务报表主要项目注释" in compact:
             return page_number
     return None
+
+
+def is_derivative_margin_balance_page(text: str) -> bool:
+    """Prefer actual balance disclosures over policies, cash flows and quotas."""
+    compact = re.sub(r"\s+", "", text)
+    return bool(
+        re.search(r"(?:期货(?:合约)?|衍生品|衍生金融工具|远期结售汇)保证金", compact)
+        and any(term in compact for term in (
+            "期末账面余额", "期末余额", "期末金额", "报告期末主要资产受限",
+        ))
+        and (
+            "按款项性质分类" in compact
+            or not any(term in compact for term in ("前五名", "坏账准备计提"))
+        )
+    )
 
 
 def parse_derivative_investment_table(
@@ -335,6 +350,11 @@ def parse_derivative_note_table(
     metrics: list[dict] = []
     fair_value_side: str | None = None
     derivative_liability_section = False
+    current_margin_column = next((
+        idx for idx, cell in enumerate(rows[0])
+        if re.sub(r"\s+", "", str(cell or ""))
+        in {"期末余额", "期末账面余额", "期末金额", "年末余额", "年末账面余额"}
+    ), None)
 
     def add(
         metric_type: str,
@@ -394,10 +414,20 @@ def parse_derivative_note_table(
         if "衍生金融负债" in label:
             derivative_liability_section = True
 
-        if "期货合约保证金" in label:
+        # The derivative qualifier can be in the restriction-reason column.
+        # A blank current cell is missing, never the prior/adjacent row's value.
+        margin_label = next((
+            re.sub(r"\s+", "", str(cell or "")) for cell in row
+            if re.search(r"(?:期货(?:合约)?|衍生品|衍生金融工具|远期结售汇)保证金",
+                         re.sub(r"\s+", "", str(cell or "")))
+        ), None)
+        if (margin_label and current_margin_column is not None
+                and not any(term in header_text for term in
+                            ("单位名称", "债务人", "往来单位", "公司名称", "账龄", "关联方"))):
             add(
-                "margin_end_cash", row[1] if len(row) > 1 else None,
-                label, "期末余额", "其他货币资金或其他应收款", "period_end",
+                "margin_end_cash",
+                row[current_margin_column] if len(row) > current_margin_column else None,
+                margin_label, "期末余额", "其他货币资金或其他应收款", "period_end",
             )
 
         if "现金流量套期储备" in label and len(row) > 3:
@@ -560,6 +590,16 @@ def extract_derivative_note_metrics(
     metrics: list[dict] = []
     try:
         page_texts = [page.get_text() for page in doc]
+        note_unit = None
+        for text in page_texts:
+            if "财务报表附注" not in text:
+                continue
+            declaration = re.search(
+                r"除特别注明外[，,\s]*金额单位为人民币\s*(千元|万元|元)", text,
+            )
+            if declaration:
+                note_unit = declaration.group(1)
+                break
         parent_note_start = find_parent_company_note_start(page_texts)
         scan_pages = sorted({
             neighbor
@@ -573,6 +613,9 @@ def extract_derivative_note_metrics(
             if parent_note_start and page_number >= parent_note_start:
                 continue
             page = doc[page_number - 1]
+            metrics.extend(parse_unruled_derivative_balances(
+                page_texts[page_number - 1], page_number, note_unit,
+            ))
             for table in page.find_tables().tables:
                 rows = table.extract()
                 unit = unit_before_table(
@@ -607,6 +650,63 @@ def extract_derivative_note_metrics(
     finally:
         doc.close()
     return metrics
+
+
+def parse_unruled_derivative_balances(
+    text: str, page: int, unit: str | None,
+) -> list[dict]:
+    """Read explicit two-date note subtotals, including noncurrent positions.
+
+    No inference from investment balances, no summation and no default unit.
+    Ambiguous/reversed date columns or missing subtotals are left for review.
+    """
+    title = '衍生金融资产和衍生金融负债'
+    if title not in re.sub(r'\s+', '', text):
+        return []
+    # Preserve blanks: collapsing them can shift a prior amount into current.
+    lines = [re.sub(r'\s+', '', line) for line in text.splitlines()]
+    starts = [(i, side) for i, line in enumerate(lines)
+              for side in ('资产', '负债')
+              if re.fullmatch(rf'衍生金融{side}[-—－]?', line)]
+    if len(starts) != 2 or [side for _, side in starts] != ['资产', '负债']:
+        return []
+    header = ''.join(lines[:starts[0][0]])
+    header = header.split(title)[-1]
+    local_units = set(re.findall(r'单位[:：](?:人民币)?(万元|千元|元)', header))
+    if len(local_units) > 1:
+        return []
+    unit = next(iter(local_units), unit)
+    if not unit:
+        return []
+    dates = [tuple(map(int, m)) for m in re.findall(r'(\d{4})年(\d{1,2})月(\d{1,2})日',header)]
+    if len(dates) != 2 or dates[0] <= dates[1]:
+        return []
+    result = []
+    for index, (start, side) in enumerate(starts):
+        end = starts[index + 1][0] if index + 1 < len(starts) else len(lines)
+        segment = lines[start:end]
+        if segment.count('小计') != 1:
+            continue
+        offset = segment.index('小计')
+        # Only the explicit subtract-noncurrent layout establishes that the
+        # subtotal is gross. Require its immediate boundary to exclude footers.
+        if (offset + 3 >= len(segment)
+                or not re.match(rf'减[:：]一年以上到期的衍生金融{side}', segment[offset + 3])):
+            continue
+        current = _table_number(segment[offset + 1])
+        prior = _table_number(segment[offset + 2])
+        if not current or not prior:
+            continue
+        result.append({
+            'metric_type': 'derivative_asset_fv' if side == '资产' else 'derivative_liability_fv',
+            'fact_level': 'report', 'scope': None, 'underlying': None,
+            'value': current[0], 'currency': 'CNY', 'unit': unit,
+            'time_basis': 'period_end', 'source_section': '衍生金融资产和衍生金融负债',
+            'account_name': f'衍生金融{side}（含非流动部分）',
+            'raw': f'衍生金融{side} 小计 {current[1]} {prior[1]}',
+            'page': page, 'table_cell_verified': True,
+        })
+    return result
 
 
 def select_candidate_pages(
@@ -655,6 +755,16 @@ def select_candidate_pages(
     # than repeated risk/policy prose. Reserve one of each before neighbours,
     # keeping the existing 15-page budget and financial-note coverage groups.
     mandatory: list[int] = []
+    parent_note_start = find_parent_company_note_start(pages)
+    # Actual balances may occur once, while policy/counterparty pages repeat
+    # "保证金" many times. Reserve these pages before frequency-based winners.
+    for page, text in enumerate(pages, 1):
+        if parent_note_start and page >= parent_note_start:
+            break
+        if is_derivative_margin_balance_page(text):
+            mandatory.append(page)
+            if len(mandatory) == 2:
+                break
     anchor_terms = (
         ('衍生品投资类', '本期公允价值变动损益'),
         ('报告期实际损益情况',),
@@ -730,16 +840,30 @@ def build_marked_text(
     """把字符预算均匀分配给候选页，避免后部财务附注被整体截掉。"""
     if not candidate_pages:
         return ""
+    # Some unruled notes state their unit only on the first notes page.
+    # Carry that literal declaration with its real page, never infer a scale
+    # from a different table's unit or from the size of its numbers.
+    unit_context = ""
+    for page_number, text in enumerate(pages, 1):
+        if "财务报表附注" not in text:
+            continue
+        declaration = re.search(
+            r"[（(]除特别注明外[^\n()（）]{0,80}金额单位(?:为|[:：])"
+            r"[^\n()（）]{0,30}[）)]", text,
+        )
+        if declaration:
+            unit_context = f"【P{page_number}】\n{declaration.group(0)}\n\n"
+            break
     headers = [f"【P{page}】\n" for page in candidate_pages]
     separator = "\n\n"
     overhead = sum(len(header) for header in headers)
     overhead += len(separator) * (len(candidate_pages) - 1)
-    page_budget = max(1, (MAX_MARKED_CHARS - overhead) // len(candidate_pages))
+    page_budget = max(1, (MAX_MARKED_CHARS - overhead - len(unit_context)) // len(candidate_pages))
     parts = [
         header + _focused_excerpt(pages[page - 1], page_budget, focus_terms)
         for header, page in zip(headers, candidate_pages)
     ]
-    return separator.join(parts)[:MAX_MARKED_CHARS]
+    return (unit_context + separator.join(parts))[:MAX_MARKED_CHARS]
 
 
 def locate_pdf(content: bytes, custom_terms: list[str] | None = None) -> LocatedReport:
