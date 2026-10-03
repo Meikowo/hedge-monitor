@@ -128,6 +128,36 @@ def is_derivative_margin_balance_page(text: str) -> bool:
     )
 
 
+INVESTMENT_HEADERS = [
+    '衍生品投资类型', '初始投资金额', '期初金额', '本期公允价值变动损益',
+    '计入权益的累计公允价值变动', '报告期内购入金额', '报告期内售出金额',
+    '期末金额', '期末投资金额占公司报告期末净资产比例',
+]
+
+
+def _compact_cells(row: list) -> list[str]:
+    return [re.sub(r'\s+', '', str(c)) for c in row if str(c or '').strip()]
+
+
+def _complete_investment_row(row: list) -> bool:
+    cells = _compact_cells(row)
+    return (len(cells) == 9 and bool(re.search(r'期货|期权|远期|外汇|商品|利率|掉期|互换', cells[0]))
+            and all(_table_number(c.removesuffix('%')) is not None for c in cells[1:]))
+
+
+def _joined_investment_header(rows: list[list], *, partial: bool = False) -> list[str] | None:
+    if not rows:
+        return None
+    columns = [''.join(re.sub(r'\s+', '', str(row[i] or '')) for row in rows if i < len(row))
+               for i in range(max(map(len, rows)))]
+    columns = [c for c in columns if c]
+    expected = INVESTMENT_HEADERS.copy()
+    if partial:
+        expected[4] = expected[4][:-1]  # “动” is printed on the next page.
+        expected[8] = expected[8][:-2]  # “比例” is printed on the next page.
+    return INVESTMENT_HEADERS.copy() if columns == expected else None
+
+
 def parse_derivative_investment_table(
     rows: list[list[str | None]],
     page: int,
@@ -135,6 +165,35 @@ def parse_derivative_investment_table(
 ) -> list[dict]:
     if len(rows) < 2:
         return []
+    # Inspect original labels before normalization: even a partially blank
+    # commodity row rules out an unambiguous all-FX table.
+    sibling_labels = [re.sub(r'\s+', '', str(row[0] or '')) for row in rows if row
+                      and re.search(r'期货|期权|远期|外汇|商品|利率|掉期|互换', str(row[0] or ''))
+                      and any(_table_number(str(c or '').removesuffix('%')) is not None for c in row[1:])]
+    generic_option_is_fx = (any('外汇' in s for s in sibling_labels)
+                            and all(s == '期权组合' or (
+                                '外汇' in s and not any(t in s for t in ('商品', '期货', '利率'))
+                            ) for s in sibling_labels))
+    first_data = next((i for i, row in enumerate(rows) if _complete_investment_row(row)), None)
+    if first_data is not None:
+        logical_header = _joined_investment_header(rows[:first_data])
+        if logical_header and (len(rows[0]) != 9 or _compact_cells(rows[0]) != INVESTMENT_HEADERS):
+            width = max(map(len, rows[:first_data]))
+            indices = [i for i in range(width) if any(
+                i < len(row) and str(row[i] or '').strip() for row in rows[:first_data])]
+            normalized = []
+            aligned = all(
+                [i for i, c in enumerate(row) if str(c or '').strip()] == indices
+                for row in rows[first_data:] if _complete_investment_row(row)
+            )
+            for row in rows[first_data:]:
+                if _complete_investment_row(row):
+                    normalized.append(_compact_cells(row))
+                elif aligned and len(row) == width:
+                    # Known physical columns retain real blanks; do not shift
+                    # amounts or discard the remaining disclosed cells.
+                    normalized.append([row[i] for i in indices])
+            rows = [logical_header, *normalized]
     headers = [re.sub(r"\s+", "", str(cell or "")) for cell in rows[0]]
     mappings = {
         "本期公允价值变动损益": ("derivative_fv_change_pnl", "period"),
@@ -184,6 +243,8 @@ def parse_derivative_investment_table(
                 scope = "利率"
             elif any(term in label for term in ("远期", "外汇", "汇率", "货币", "掉期")):
                 scope = "外汇"
+            elif label == '期权组合' and generic_option_is_fx:
+                scope = '外汇'
             elif any(term in label for term in ("期货", "期权", "商品")):
                 scope = "商品"
             else:
@@ -234,6 +295,8 @@ def parse_derivative_investment_table(
             scope = "利率"
         elif any(term in label for term in ("远期", "外汇", "汇率", "货币", "掉期")):
             scope = "外汇"
+        elif label == '期权组合' and generic_option_is_fx:
+            scope = '外汇'
         elif any(term in label for term in ("期货", "期权", "商品")):
             scope = "商品"
         else:
@@ -308,6 +371,13 @@ def merge_derivative_continuation(
     same_width = bool(prior_header_rows) and all(
         len(row) == len(prior_header_rows[0]) for row in rows
     )
+    if (prior_header_rows and prior_page == page - 1 and table_top < 350
+            and rows and set(_compact_cells(rows[0])) == {'动', '比例'}):
+        logical_header = _joined_investment_header(prior_header_rows, partial=True)
+        if logical_header:
+            complete_rows = [_compact_cells(row) for row in rows[1:] if _complete_investment_row(row)]
+            if complete_rows:
+                return [logical_header, *complete_rows]
     if (
         prior_header_rows
         and is_business_row
