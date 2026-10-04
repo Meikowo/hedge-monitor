@@ -214,6 +214,53 @@ def should_skip_reviewed(review_status: str | None, force_reviewed: bool) -> boo
     return review_status == "accepted" and not force_reviewed
 
 
+def explicit_pnl_component(value: float, unit: str | None, quote: str) -> str | None:
+    """Match a literal amount to its adjacent component label, not a model label.
+
+    None means no correction; an empty string rejects an ambiguous component.
+    Require the same literal unit to avoid conflating equal numerals at different scales.
+    """
+    compact = re.sub(r'\s+', '', quote).replace('（', '(').replace('）', ')')
+    compact = re.sub(r'(?<=\d),(?=\d{3}(?:\D|$))', '', compact)
+    number = r'(?P<amount>\([-+−]?\d+(?:\.\d+)?\)|[-+−]?\d+(?:\.\d+)?)'
+    amount = r'(?:为|：|:)?(?:人民币)?' + number + r'(?P<unit>亿元|万元|千元|元)'
+    pattern = r'(?P<label>公允价值变动(?:损益|收益|损失)|处置(?:损益|收益|损失)|交割确认(?:的)?投资收益|合计)' + amount
+    derivative = r'衍生|期货|期权|外汇|远期|掉期|互换|套期|T\+D'
+    types = set()
+    relevant_total = False
+    for clause in re.split(r'[，,；;。]', compact):
+        for match in re.finditer(pattern, clause):
+            literal = match['amount'].replace('−', '-')
+            negative = literal.startswith('(') or '损失' in match['label']
+            numeric = float(literal.strip('()'))
+            if negative: numeric = -abs(numeric)
+            if numeric != value or match['unit'] != unit:
+                continue
+            prefix = clause[:match.start()]
+            if re.search(r'预计|预测|假设|敏感性|可能|计划|固定资产|长期股权', clause):
+                if match['label'] != '合计':
+                    return ''
+                continue
+            if not re.search(derivative, compact):
+                if match['label'] != '合计':
+                    return ''
+                continue
+            if match['label'] == '合计':
+                # A standalone total following components, or a total explicitly
+                # attributed to derivatives, not an unrelated expense total.
+                if not prefix or re.search(derivative, prefix):
+                    relevant_total = True
+                continue
+            if re.search(r'(?:投资收益|处置损益|处置收益|公允价值变动损益|浮动损益|平仓损益|持仓损益)[与及和、]$', prefix):
+                relevant_total = True
+                continue
+            types.add('derivative_fv_change_pnl' if match['label'].startswith('公允价值')
+                      else 'derivative_disposal_investment_income')
+    if relevant_total:
+        return None
+    return next(iter(types)) if len(types) == 1 else ('' if types else None)
+
+
 def extract_explicit_pnl_metrics(body: str) -> list[dict]:
     """兜底提取“报告期实际损益情况”中的明确平仓与持仓损益合计。"""
     metrics: list[dict] = []
@@ -532,12 +579,25 @@ def current_no_derivative_phrase(body: str) -> str | None:
     return None
 
 
+def has_current_derivative_business(body: str) -> bool:
+    """A source statement of execution can contradict a denial without numbers."""
+    compact = re.sub(r'\s+', '', body or '')
+    for clause in re.split(r'[。；;\n]|【P\d+】', compact):
+        if re.search(r'拟|将|计划|可能|未开展|未签|不存在|尚未|上年|上期|上一报告期', clause):
+            continue
+        if (re.search(r'本期|报告期', clause)
+                and re.search(r'已开展|开展了|已签署|已签订|已持有|实际开展|仍持有', clause)
+                and re.search(r'衍生|期货|期权|远期|掉期|互换|结售汇', clause)):
+            return True
+    return False
+
+
 def normalize_accounting_items(result: dict, body: str) -> list[dict]:
     no_derivative_phrase = current_no_derivative_phrase(body)
     if no_derivative_phrase:
         page, quote = find_page_evidence(body, no_derivative_phrase)
         _, verified_metrics = normalize(result, body)
-        conflicting = bool(verified_metrics)
+        conflicting = bool(verified_metrics) or has_current_derivative_business(body)
         return [{
             "scope": None,
             "instrument": None,
@@ -936,6 +996,12 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         if metric_type not in METRICS:
             continue
         value, unit = restore_literal_scale(value, raw_item.get("unit"), quote)
+        if metric_type == 'reported_derivative_comprehensive_pnl':
+            component = explicit_pnl_component(value, unit, quote)
+            if component == '':
+                continue
+            if component:
+                metric_type = component
         if (metric_type in {'derivative_asset_fv', 'derivative_liability_fv'}
                 and raw_item.get('table_cell_verified') is not True):
             # An investment/net-balance row is not a gross asset/liability.
@@ -1058,13 +1124,19 @@ def normalize(result: dict, body: str) -> tuple[dict, list[dict]]:
         seen_metrics.add(key)
         deduplicated.append(item)
     metrics = deduplicated
-    if no_derivative_phrase and metrics:
+    if no_derivative_phrase and (metrics or has_current_derivative_business(body)):
         top.update({
             "disclosure_status": "需复核", "hedge_accounting_status": "需复核",
             "hedge_accounting": [], "hedge_accounting_types": [],
             "non_application_reason": None,
-            "summary": "报告中的无衍生品投资说明与数值披露存在冲突，需复核。",
+            "summary": "报告中的无衍生品投资说明与数值或实际业务披露存在冲突，需复核。",
         })
+    elif no_derivative_phrase:
+        # Plans/policies are not executed trades when the report explicitly
+        # states no current derivative investment and no numeric conflict exists.
+        top.update(scopes=[], instruments=[], underlyings=[], purpose=None)
+        top['evidence'] = [e for e in top['evidence'] if isinstance(e, dict)
+                           and e.get('field') not in {'scopes', 'instruments', 'underlyings', 'purpose'}]
     if metrics and top["disclosure_status"] in {"提及无数值", "未提及"}:
         has_profile_hedge_context = bool(top["scopes"] or top["purpose"])
         top["disclosure_status"] = "有数值" if (
