@@ -407,11 +407,20 @@ def parse_derivative_note_table(
     rows: list[list[str | None]],
     page: int,
     unit: str,
+    *, rejected_keys: list[tuple] | None = None,
 ) -> list[dict]:
     """从财务附注表格抽取可由表头和单元格直接确认的衍生品事实。"""
     if len(rows) < 2:
         return []
-    header_rows = rows[:2]
+    header_rows = []
+    for row in rows[:4]:
+        if any(_table_number(cell) is not None for cell in row[1:]):
+            break
+        if '现金流量套期储备' in ''.join(str(c or '') for c in row):
+            break
+        header_rows.append(row)
+    if not header_rows:
+        header_rows = rows[:1]
     header_text = " ".join(
         re.sub(r"\s+", "", str(cell or ""))
         for row in header_rows
@@ -420,6 +429,19 @@ def parse_derivative_note_table(
     metrics: list[dict] = []
     fair_value_side: str | None = None
     derivative_liability_section = False
+    derivative_children: list[float] = []
+    def column_index(term: str) -> int | None:
+        for idx in range(max(map(len, header_rows))):
+            label = ''.join(re.sub(r'\s+', '', str(row[idx] or ''))
+                            for row in header_rows if idx < len(row))
+            if term in label:
+                return idx
+        return None
+    oci_column = column_index("本期所得税前发生额")
+    reclassification_column = column_index("前期计入其他综合收益当期转入损益")
+    current_pnl_column = column_index('本期发生额')
+    if current_pnl_column is None:
+        current_pnl_column = column_index('本年发生额')
     current_margin_column = next((
         idx for idx, cell in enumerate(rows[0])
         if re.sub(r"\s+", "", str(cell or ""))
@@ -436,6 +458,8 @@ def parse_derivative_note_table(
     ) -> None:
         parsed = _table_number(value_cell)
         if not parsed:
+            if rejected_keys is not None and not str(value_cell or '').strip():
+                rejected_keys.append((metric_type, page, label))
             return
         value, raw_value = parsed
         metrics.append({
@@ -483,6 +507,15 @@ def parse_derivative_note_table(
             fair_value_side = "liability"
         if "衍生金融负债" in label:
             derivative_liability_section = True
+            derivative_children = []
+        elif derivative_liability_section and "负债总额" not in label:
+            if any(term in label for term in ("期货", "期权", "外汇衍生", "利率衍生")):
+                numeric = next((_table_number(c) for c in reversed(row[1:]) if _table_number(c)), None)
+                if numeric:
+                    derivative_children.append(numeric[0])
+            else:
+                derivative_liability_section = False
+                derivative_children = []
 
         # The derivative qualifier can be in the restriction-reason column.
         # A blank current cell is missing, never the prior/adjacent row's value.
@@ -501,15 +534,16 @@ def parse_derivative_note_table(
             )
 
         if "现金流量套期储备" in label and len(row) > 3:
-            add(
-                "oci_amount", row[2], label, "本期所得税前发生额",
-                "其他综合收益", "period",
-            )
-            add(
-                "reclassification_amount", row[3], label,
-                "前期计入其他综合收益当期转入损益",
-                "其他综合收益", "period",
-            )
+            for kind, index, column in (
+                ('oci_amount', oci_column, '本期所得税前发生额'),
+                ('reclassification_amount', reclassification_column, '前期计入其他综合收益当期转入损益'),
+            ):
+                if index is not None and index < len(row):
+                    add(kind, row[index], label, column, '其他综合收益', 'period')
+                elif (rejected_keys is not None and kind == 'reclassification_amount'
+                      and oci_column is not None and column_index('税后归属于母公司') is not None
+                      and '转入' not in header_text):
+                    rejected_keys.append((kind, page, label))
 
         if (
             "衍生金融工具取得的投资收益" in label
@@ -530,9 +564,16 @@ def parse_derivative_note_table(
                 )
             )
         ):
+            # Retain legacy headerless continuation extraction only when a
+            # numeric first cell exists; unknown layout never proves a blank.
+            pnl_column = current_pnl_column
+            if pnl_column is None:
+                if len(row) < 2 or _table_number(row[1]) is None:
+                    continue
+                pnl_column = 1
             add(
                 "derivative_disposal_investment_income",
-                row[1] if len(row) > 1 else None,
+                row[pnl_column] if len(row) > pnl_column else None,
                 label, "本期发生额", "投资收益", "period",
             )
 
@@ -543,9 +584,11 @@ def parse_derivative_note_table(
                 and "产生公允价值变动收益的来源" in header_text
             )
         ):
+            if current_pnl_column is None:
+                continue
             add(
                 "derivative_fv_change_pnl",
-                row[1] if len(row) > 1 else None,
+                row[current_pnl_column] if len(row) > current_pnl_column else None,
                 label, "本期发生额", "公允价值变动收益", "period",
             )
 
@@ -582,6 +625,7 @@ def parse_derivative_note_table(
                 )
         if (
             derivative_liability_section
+            and derivative_children
             and "负债总额" in label
             and any(term in header_text for term in ("期末公允价值", "年末公允价值"))
         ):
@@ -592,10 +636,12 @@ def parse_derivative_note_table(
                 ),
                 None,
             )
-            add(
-                "derivative_liability_fv", value_cell, "衍生金融负债",
-                "期末公允价值合计", "公允价值的披露", "period_end",
-            )
+            parsed_total = _table_number(value_cell)
+            if parsed_total and abs(sum(derivative_children) - parsed_total[0]) < 0.01:
+                add(
+                    "derivative_liability_fv", value_cell, "衍生金融负债",
+                    "期末公允价值合计", "公允价值的披露", "period_end",
+                )
             derivative_liability_section = False
     return metrics
 
@@ -654,6 +700,7 @@ def extract_derivative_table_metrics(
 def extract_derivative_note_metrics(
     content: bytes,
     candidate_pages: list[int],
+    *, rejected_keys: list[tuple] | None = None,
 ) -> list[dict]:
     """扫描候选页财务附注表格，补足保证金、期末公允价值及损益组成。"""
     doc = fitz.open(stream=content, filetype="pdf")
@@ -679,6 +726,7 @@ def extract_derivative_note_metrics(
         })
         carry_fair_value_headers: list[list[str | None]] | None = None
         carry_page: int | None = None
+        carry_fair_value_unit: str | None = None
         for page_number in scan_pages:
             if parent_note_start and page_number >= parent_note_start:
                 continue
@@ -701,10 +749,14 @@ def extract_derivative_note_metrics(
                 if any(term in header_text for term in ("期末公允价值", "年末公允价值")):
                     carry_fair_value_headers = rows[:2]
                     carry_page = page_number
+                    carry_fair_value_unit = unit
                 elif (
                     carry_fair_value_headers
                     and carry_page == page_number - 1
                     and table.bbox[1] < 350
+                    and not any(term in header_text for term in (
+                        '期初余额', '本期增加', '本期减少', '期末余额', '本期发生额',
+                    ))
                     and any(
                         "衍生金融负债" in re.sub(r"\s+", "", str(row[0] or ""))
                         for row in rows
@@ -712,10 +764,18 @@ def extract_derivative_note_metrics(
                     )
                 ):
                     rows = [*carry_fair_value_headers, *rows]
+                    explicit_local_unit = any(
+                        len(block) >= 5 and float(block[1]) <= table.bbox[1] + 2
+                        and re.search(r'单位\s*[:：]', str(block[4] or ''))
+                        for block in page.get_text('blocks')
+                    )
+                    if not explicit_local_unit:
+                        unit = carry_fair_value_unit or unit
                 metrics.extend(parse_derivative_note_table(
                     rows,
                     page=page_number,
                     unit=unit,
+                    rejected_keys=rejected_keys,
                 ))
     finally:
         doc.close()

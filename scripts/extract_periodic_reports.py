@@ -521,6 +521,7 @@ def merge_verified_note_metrics(
     result: dict,
     note_metrics: list[dict],
     selected_passes: list[str],
+    *, rejected_keys: list[tuple] | None = None,
 ) -> dict:
     selected_types = {
         metric_type
@@ -535,12 +536,21 @@ def merge_verified_note_metrics(
         (item.get("metric_type"), item.get("page"))
         for item in selected_notes
     }
+    def label_key(value):
+        return re.sub(r'\s+|其中[:：]?', '', normalize_account_key(value))
+    rejected = {(kind, page, label_key(label)) for kind, page, label in (rejected_keys or [])}
+    def source_row_rejected(item):
+        raw = label_key(item.get('raw'))
+        return any(kind == item.get('metric_type') and page == item.get('page')
+                   and label and label in raw for kind, page, label in rejected)
     merged = dict(result)
     merged["metrics"] = [
         item for item in result.get("metrics") or []
         if not (
             isinstance(item, dict)
-            and (item.get("metric_type"), item.get("page")) in verified_keys
+            and ((item.get("metric_type"), item.get("page")) in verified_keys
+                 or (item.get("metric_type"), item.get("page"), label_key(item.get('account_name'))) in rejected
+                 or source_row_rejected(item))
         )
     ]
     merged["metrics"].extend(selected_notes)
@@ -1272,10 +1282,15 @@ def extract_one_report(
         table_pages,
         selected_passes,
     )
+    rejected_note_keys: list[tuple] = []
+    note_metrics = extract_derivative_note_metrics(
+        content, located.candidate_pages, rejected_keys=rejected_note_keys,
+    )
     result = merge_verified_note_metrics(
         result,
-        extract_derivative_note_metrics(content, located.candidate_pages),
+        note_metrics,
         selected_passes,
+        rejected_keys=rejected_note_keys,
     )
     if "pnl" in metric_results:
         deterministic = extract_explicit_pnl_metrics(located.marked_text)
