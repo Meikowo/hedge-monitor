@@ -580,7 +580,7 @@ def parse_derivative_note_table(
         if (
             "衍生金融工具产生的公允价值变动" in label
             or (
-                label == "衍生金融工具"
+                label in {"衍生金融工具", "衍生金融资产", "衍生金融负债"}
                 and "产生公允价值变动收益的来源" in header_text
             )
         ):
