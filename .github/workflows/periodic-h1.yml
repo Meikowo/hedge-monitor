@@ -1,0 +1,75 @@
+name: Periodic Reports 2026 H1
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/periodic-h1.yml']
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'metadata 只发现报告；queue 定位并抽取'
+        type: choice
+        options: [metadata, queue]
+        default: metadata
+        required: true
+      locate_limit:
+        description: '最多定位份数（1—48）'
+        default: '48'
+      extract_limit:
+        description: '最多抽取份数（1—36）'
+        default: '36'
+      confirm_llm:
+        description: '手动 queue 必须勾选；确认使用现有 LLM_API_KEY'
+        type: boolean
+        default: false
+  schedule:
+    # 北京 07:20，每日元数据；首次发布/修改本工作流也只运行元数据。
+    - cron: '20 23 * * *'
+    # 北京 02:15 / 08:15 / 14:15 / 20:15，队列不扫描全市场。
+    - cron: '15 0,6,12,18 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cninfo
+  cancel-in-progress: false
+
+jobs:
+  periodic-h1:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.PERIODIC_H1_AUTO_ENABLED != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      PYTHONUTF8: '1'
+      LLM_THINKING: 'off'
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Discover H1 reports (no LLM)
+        if: github.event_name == 'push' || (github.event_name == 'schedule' && github.event.schedule == '20 23 * * *') || (github.event_name == 'workflow_dispatch' && inputs.stage == 'metadata')
+        run: python scripts/run_periodic_h1.py --stage metadata
+      - name: Require manual LLM confirmation
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'queue' && !inputs.confirm_llm
+        run: |
+          echo 'queue 必须勾选 confirm_llm；未调用模型'
+          exit 2
+      - name: Run H1 queue
+        if: (github.event_name == 'schedule' && github.event.schedule == '15 0,6,12,18 * * *') || (github.event_name == 'workflow_dispatch' && inputs.stage == 'queue' && inputs.confirm_llm)
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LOCATE_LIMIT: ${{ github.event_name == 'schedule' && '48' || inputs.locate_limit || '48' }}
+          EXTRACT_LIMIT: ${{ github.event_name == 'schedule' && '36' || inputs.extract_limit || '36' }}
+        run: python scripts/run_periodic_h1.py --stage queue --locate-limit "$LOCATE_LIMIT" --extract-limit "$EXTRACT_LIMIT" --confirm-llm
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: periodic-h1-${{ github.event_name }}-${{ github.run_id }}
+          path: output/*
+          if-no-files-found: ignore
+          retention-days: 30
